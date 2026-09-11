@@ -1,6 +1,6 @@
 # Proofstack
 
-A GitHub portfolio manager built with Next.js 15, React 19, Supabase, Gemini, and Upstash Redis. Connect GitHub, synchronize repository metadata, generate README summaries, and ask questions using your indexed README context.
+A GitHub portfolio manager built with Next.js 15, React 19, Supabase, Gemini, and Upstash Redis. Connect GitHub, synchronize repository metadata, generate README summaries, and ask questions using structured project metadata and indexed README context.
 
 ## Features and scope
 
@@ -9,7 +9,7 @@ A GitHub portfolio manager built with Next.js 15, React 19, Supabase, Gemini, an
 - README summaries and technology extraction using `gemini-3.5-flash`, falling back to `gemini-3.1-flash-lite`. Chat uses the same model pair through `@google/genai`.
 - `gemini-embedding-2` embeddings explicitly requested at 768 dimensions and stored in pgvector. Invalid, nonfinite, zero, or incorrectly sized vectors are rejected rather than silently truncated. Retrieval uses cosine distance.
 - One current README embedding per project, keyed by `(project_id, source)` with source `readme`. Summary extraction uses the first 15,000 README characters; embedding uses the first 8,000. Failed AI extraction preserves existing summary and technologies.
-- README-based chat retrieves up to five matching documents belonging to the authenticated user. Project-scoped requests filter before ranking through an additive project-specific RPC; the original portfolio-wide RPC remains compatible. It does not browse source files, execute code, or retrieve task/milestone state. A code-map helper exists, but no code-map upload/indexing workflow is exposed.
+- Hybrid chat always supplies up to 500 authenticated-user project records as structured metadata and retrieves up to five matching README documents for semantic detail. The context reports whether the catalog is complete so the model does not make unsupported exhaustive claims. Project-scoped requests filter both sources to the selected project, and structured metadata remains available if embedding or vector retrieval is unavailable. Chat does not browse source files, execute code, or retrieve task/milestone state. A code-map helper exists, but no code-map upload/indexing workflow is exposed.
 - Searchable and sortable dashboard, task/milestone tracking, locally bundled Devicons, and keyboard-accessible controls.
 
 ## Requirements
@@ -98,7 +98,7 @@ npm run build
 npm audit
 ```
 
-Tests cover request boundaries, signatures, authentication and redirects, cache isolation, pagination, rate limits, processing leases/idempotency, and Gemini fallback/embedding behavior. External providers are simulated; these tests do not prove live provider availability or deployed RLS behavior. Migration tests are static checks, not a PostgreSQL execution test.
+Tests cover request boundaries, signatures, authentication and redirects, hybrid chat context and retrieval fallback, cache isolation, pagination, rate limits, processing leases/idempotency, and Gemini fallback/embedding behavior. External providers are simulated; these tests do not prove live provider availability or deployed RLS behavior. Migration tests are static checks, not a PostgreSQL execution test.
 
 Next.js and `eslint-config-next` are pinned to stable 15.5.24. Audit findings must be reviewed before deployment; a stable framework pin is not a claim that every transitive dependency is vulnerability-free.
 
