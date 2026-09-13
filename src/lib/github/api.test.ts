@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { fetchGithubRepos, fetchGithubReadme, MAX_GITHUB_PAGES } from './api'
+import { fetchGithubPackageDependencies, fetchGithubRepos, fetchGithubReadme, MAX_GITHUB_PAGES } from './api'
 
 const io = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(), cache: new Map<string, unknown>() }))
 // Mock Upstash Redis
@@ -101,6 +101,30 @@ describe('GitHub helpers', () => {
     io.get.mockResolvedValue('x'.repeat(1024 * 1024 + 1))
     await expect(fetchGithubReadme('owner', 'repo', identity)).rejects.toThrow('GitHub service temporarily unavailable')
     expect(io.set).not.toHaveBeenCalled()
+  })
+  it('fetches, validates and caches package dependency names from every dependency section', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      dependencies: { next: '15.5.24', react: '^19.0.0' },
+      devDependencies: { typescript: '^5', vitest: '^4' },
+      peerDependencies: { react: '^19.0.0' },
+      optionalDependencies: { sharp: '^0.34.0' }
+    })))
+    const expected = ['next', 'react', 'typescript', 'vitest', 'sharp']
+    expect(await fetchGithubPackageDependencies('owner', 'repo', identity)).toEqual(expected)
+    expect(await fetchGithubPackageDependencies('owner', 'repo', identity)).toEqual(expected)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledWith('https://api.github.com/repos/owner/repo/contents/package.json', expect.objectContaining({
+      redirect: 'error', headers: expect.objectContaining({ Accept: 'application/vnd.github.raw' })
+    }))
+  })
+  it('caches missing package manifests and rejects malformed manifests and paths', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('', { status: 404 }))
+    expect(await fetchGithubPackageDependencies('owner', 'missing', identity)).toBeNull()
+    expect(await fetchGithubPackageDependencies('owner', 'missing', identity)).toBeNull()
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ dependencies: [] })))
+    await expect(fetchGithubPackageDependencies('owner', 'malformed', identity)).rejects.toThrow('GitHub service temporarily unavailable')
+    await expect(fetchGithubPackageDependencies('owner', '..', identity)).rejects.toThrow()
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
   it('returns null for missing READMEs and rejects path traversal before fetching', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('', { status: 404 }))

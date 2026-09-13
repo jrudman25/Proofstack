@@ -18,6 +18,7 @@ it('names search and GitHub links and exposes selected sorting', () => {
   expect(link).toHaveAttribute('href', project.html_url)
   link.focus()
   expect(link).toHaveFocus()
+  expect(screen.queryByRole('button', { name: /generate ai summary/i })).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Recently Updated' })).toHaveAttribute('aria-pressed', 'true')
   fireEvent.click(screen.getByRole('button', { name: 'Alphabetical' }))
   expect(screen.getByRole('button', { name: 'Alphabetical' })).toHaveAttribute('aria-pressed', 'true')

@@ -22,7 +22,9 @@ beforeEach(() => {
   io.upsert.mockResolvedValue({ error: null })
   io.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, upsert: io.upsert })
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
-    const page = Number(new URL(url).searchParams.get('page'))
+    const parsed = new URL(url)
+    if (parsed.pathname.endsWith('/contents/package.json')) return new Response('', { status: 404 })
+    const page = Number(parsed.searchParams.get('page'))
     return new Response(JSON.stringify(repos.slice((page - 1) * 100, page * 100)))
   }))
 })
@@ -35,12 +37,33 @@ it('paginates and upserts bounded batches owned by the verified user', async () 
   const response = await POST(request())
   expect(response.status).toBe(200)
   expect(await response.json()).toMatchObject({ syncedCount: 205 })
-  expect(fetch).toHaveBeenCalledTimes(3)
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => new URL(String(url)).pathname === '/user/repos')).toHaveLength(3)
   expect(io.upsert.mock.calls.map(call => call[0].length)).toEqual([100, 100, 5])
   for (const [batch, options] of io.upsert.mock.calls) {
     expect(batch.every((row: { user_id: string }) => row.user_id === userId)).toBe(true)
     expect(options).toEqual({ onConflict: 'user_id,github_repo_id' })
   }
+})
+it('merges detected package technologies with existing project metadata', async () => {
+  const profileQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single }
+  const projectQuery = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockResolvedValue({ data: [{ github_repo_id: 1, technologies: ['Custom Tool'] }], error: null }),
+    upsert: io.upsert
+  }
+  io.from.mockImplementation((table: string) => table === 'profiles' ? profileQuery : projectQuery)
+  vi.mocked(fetch).mockImplementation(async input => {
+    const parsed = new URL(String(input))
+    if (parsed.pathname.endsWith('/repo-0/contents/package.json')) {
+      return new Response(JSON.stringify({ dependencies: { next: '15.5.24', react: '^19.0.0' } }))
+    }
+    if (parsed.pathname.endsWith('/contents/package.json')) return new Response('', { status: 404 })
+    const page = Number(parsed.searchParams.get('page'))
+    return new Response(JSON.stringify(repos.slice((page - 1) * 100, page * 100)))
+  })
+  const response = await POST(request())
+  expect(await response.json()).toMatchObject({ syncedCount: 205, packageJsonCount: 1 })
+  expect(io.upsert.mock.calls[0][0][0]).toMatchObject({ technologies: ['Custom Tool', 'Next.js', 'React'] })
 })
 it('prefers the encrypted stored token without consulting the transient provider session', async () => {
   io.getToken.mockResolvedValue('stored-token')
@@ -55,14 +78,14 @@ it.each([false, true])('reports only confirmed writes when a later batch fails (
   else io.upsert.mockResolvedValueOnce({ error: new Error('secret-database') })
   const response = await POST(request())
   expect(response.status).toBe(503)
-  expect(await response.json()).toEqual({ error: 'Service temporarily unavailable', syncedCount: 100 })
+  expect(await response.json()).toEqual({ error: 'Service temporarily unavailable', syncedCount: 100, packageJsonCount: 0 })
   expect(io.upsert).toHaveBeenCalledTimes(2)
 })
 it('checks profile database errors before writes', async () => {
   io.single.mockResolvedValue({ data: { id: userId }, error: new Error('secret') })
   const response = await POST(request())
   expect(response.status).toBe(503)
-  expect(await response.json()).toEqual({ error: 'Service temporarily unavailable', syncedCount: 0 })
+  expect(await response.json()).toEqual({ error: 'Service temporarily unavailable', syncedCount: 0, packageJsonCount: 0 })
   expect(io.upsert).not.toHaveBeenCalled()
 })
 it('does not persist any page when a later GitHub page is malformed', async () => {
