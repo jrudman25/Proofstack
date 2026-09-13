@@ -5,6 +5,8 @@ import { createRedis, redisKey, type UserContext } from '@/lib/redis'
 
 export type GithubIdentity = UserContext & { accessToken: string | undefined }
 export const MAX_GITHUB_PAGES = 50
+const MAX_PACKAGE_BYTES = 256 * 1024
+const PACKAGE_DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const
 export type GithubRepo = {
   id: number; name: string; full_name: string; description: string | null
   html_url: string; language: string | null; homepage: string | null
@@ -21,6 +23,36 @@ function headers(identity: GithubIdentity, accept: string): Record<string, strin
     Accept: accept, 'User-Agent': 'repolio', 'X-GitHub-Api-Version': '2022-11-28',
     ...(identity.accessToken ? { Authorization: `Bearer ${identity.accessToken}` } : {}),
   }
+}
+function validRepositoryPath(owner: string, repo: string) {
+  return typeof owner === 'string' && typeof repo === 'string' && /^[\w-]+$/.test(owner)
+    && /^[\w.-]+$/.test(repo) && repo !== '.' && repo !== '..'
+}
+function validateDependencyNames(value: unknown) {
+  if (!Array.isArray(value) || value.length > 2000
+    || value.some(name => typeof name !== 'string' || name.length < 1 || name.length > 214)) unavailable()
+  return value as string[]
+}
+function parsePackageDependencies(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable()
+  const manifest = value as Record<string, unknown>
+  const dependencies = new Set<string>()
+  for (const field of PACKAGE_DEPENDENCY_FIELDS) {
+    const section = manifest[field]
+    if (section === undefined) continue
+    if (!section || typeof section !== 'object' || Array.isArray(section)) unavailable()
+    const entries = Object.entries(section)
+    if (entries.length > 2000 || entries.some(([name, version]) => name.length > 214 || typeof version !== 'string')) unavailable()
+    for (const [name] of entries) dependencies.add(name)
+  }
+  return validateDependencyNames(Array.from(dependencies))
+}
+function parsePackageCache(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable()
+  const cached = value as Record<string, unknown>
+  if (cached.found === false && Array.isArray(cached.dependencies) && cached.dependencies.length === 0) return null
+  if (cached.found !== true) unavailable()
+  return validateDependencyNames(cached.dependencies)
 }
 function parseRepos(value: unknown, limit: number): GithubRepo[] {
   if (!Array.isArray(value) || value.length > limit) unavailable()
@@ -80,9 +112,35 @@ export async function fetchGithubRepos(identity: GithubIdentity): Promise<Github
   }
 }
 
+export async function fetchGithubPackageDependencies(owner: string, repo: string, identity: GithubIdentity): Promise<string[] | null> {
+  try {
+    if (!validRepositoryPath(owner, repo) || !identity.accessToken?.trim()) unavailable()
+    const redis = createRedis()
+    const key = cacheKey(identity, 'github-package', owner, repo)
+    const cached = await redis.get(key)
+    if (cached !== null) return parsePackageCache(cached)
+    const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/package.json`, {
+      headers: headers(identity, 'application/vnd.github.raw'), redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (res.status === 404) {
+      await redis.set(key, { found: false, dependencies: [] }, { ex: 3600 })
+      return null
+    }
+    if (!res.ok) unavailable()
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(await readBodyBytes(res, MAX_PACKAGE_BYTES))
+    const dependencies = parsePackageDependencies(JSON.parse(text))
+    await redis.set(key, { found: true, dependencies }, { ex: 3600 })
+    return dependencies
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    unavailable()
+  }
+}
+
 export async function fetchGithubReadme(owner: string, repo: string, identity: GithubIdentity): Promise<string | null> {
   try {
-    if (typeof owner !== 'string' || typeof repo !== 'string' || !/^[\w-]+$/.test(owner) || !/^[\w.-]+$/.test(repo) || repo === '.' || repo === '..') unavailable()
+    if (!validRepositoryPath(owner, repo)) unavailable()
     const redis = createRedis()
     const key = cacheKey(identity, 'github-readme', owner, repo)
     const cached = await redis.get(key)
