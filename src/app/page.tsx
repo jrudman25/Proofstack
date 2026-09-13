@@ -24,5 +24,17 @@ export default async function Home() {
     console.error('Error fetching projects:', error)
   }
 
-  return <Dashboard initialProjects={projects || []} />
+  const meta = user.user_metadata as Record<string, unknown> | undefined
+  const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : null)
+
+  return (
+    <Dashboard
+      initialProjects={projects || []}
+      user={{
+        handle: str(meta?.user_name) ?? str(meta?.preferred_username),
+        displayName: str(meta?.full_name) ?? str(meta?.name) ?? str(user.email),
+        avatarUrl: str(meta?.avatar_url),
+      }}
+    />
+  )
 }

@@ -2,10 +2,14 @@
 
 import { useState, useMemo } from 'react'
 import { Project } from '@/types'
-import { Search, RefreshCw, Star, Calendar } from 'lucide-react'
+import { RefreshCw, Star, LogOut } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/GithubIcon'
+import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
+import { createClient } from '@/utils/supabase/client'
+import { languageColor } from '@/lib/language-colors'
 import Link from 'next/link'
+import Image from 'next/image'
 
 const mapTechToDevicon = (tech: string) => {
   const t = tech.toLowerCase()
@@ -24,13 +28,36 @@ const mapTechToDevicon = (tech: string) => {
   return null
 }
 
-export default function Dashboard({ initialProjects }: { initialProjects: Project[] }) {
+const SORTS = [
+  { key: 'updated', label: 'Recently Updated' },
+  { key: 'stars', label: 'Most Stars' },
+  { key: 'name', label: 'Alphabetical' },
+] as const
+
+type DashboardUser = {
+  handle: string | null
+  displayName: string | null
+  avatarUrl: string | null
+}
+
+const isoDate = (value: string | null) => {
+  if (!value) return '----.--.--'
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? '----.--.--' : d.toISOString().slice(0, 10)
+}
+
+export default function Dashboard({
+  initialProjects,
+  user,
+}: {
+  initialProjects: Project[]
+  user?: DashboardUser | null
+}) {
   const [projects] = useState<Project[]>(initialProjects)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'updated' | 'stars' | 'name'>('updated')
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
-  const [processingId, setProcessingId] = useState<string | null>(null)
 
   const handleSync = async () => {
     setIsSyncing(true)
@@ -52,25 +79,10 @@ export default function Dashboard({ initialProjects }: { initialProjects: Projec
     }
   }
 
-  const handleAIProcess = async (projectId: string) => {
-    setProcessingId(projectId)
-    try {
-      const res = await fetch('/api/process-project', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId })
-      })
-      if (res.ok) {
-        window.location.reload()
-      } else {
-        alert('Unable to generate summary. Please try again.')
-      }
-    } catch (e) {
-      console.error(e)
-      alert('Network error while processing.')
-    } finally {
-      setProcessingId(null)
-    }
+  const handleSignOut = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    window.location.href = '/login'
   }
 
   const filteredAndSorted = useMemo(() => {
@@ -95,153 +107,218 @@ export default function Dashboard({ initialProjects }: { initialProjects: Projec
   }, [projects, search, sort])
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white p-8 font-sans">
-      <div className="max-w-7xl mx-auto space-y-8">
-
-        {/* Header Section */}
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-zinc-800">
-          <div>
-            <h1 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">
+    <div className="min-h-screen font-sans">
+      {/* Top bar */}
+      <header className="sticky top-0 z-40 border-b border-line bg-ink/90 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex items-center gap-3">
+            <Logo className="h-6 w-6 text-brand" />
+            <h1 className="hidden font-mono text-sm font-bold uppercase tracking-[0.3em] sm:block">
               Proofstack
             </h1>
-            <p className="text-zinc-400 mt-2">Manage and query your GitHub portfolio.</p>
           </div>
-          <div className="flex items-center gap-4">
-            {syncMessage && <span role="status" className="text-sm text-zinc-400">{syncMessage}</span>}
+
+          <div className="flex items-center gap-3">
+            {syncMessage && (
+              <span role="status" className="hidden font-mono text-[11px] text-faint sm:inline">
+                {syncMessage}
+              </span>
+            )}
             <Button
               onClick={handleSync}
               disabled={isSyncing}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-lg shadow-indigo-500/20"
+              aria-label="Sync GitHub"
+              className="font-mono text-[10px] uppercase tracking-[0.12em] sm:text-[11px] sm:tracking-[0.15em]"
             >
-              <RefreshCw className={`w-4 h-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
-              Sync GitHub
+              <RefreshCw className={isSyncing ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline">Sync GitHub</span>
+              <span className="sm:hidden">Sync</span>
             </Button>
-          </div>
-        </header>
 
-        {/* Controls Section */}
-        <section className="flex flex-col md:flex-row gap-4 items-center justify-between bg-zinc-900/50 p-4 rounded-2xl border border-zinc-800/50 backdrop-blur-sm">
+            {user && (
+              <div className="flex items-center gap-3 border-l border-line pl-4">
+                {user.avatarUrl && (
+                  <Image
+                    src={user.avatarUrl}
+                    alt=""
+                    width={28}
+                    height={28}
+                    className="h-7 w-7 border border-line"
+                  />
+                )}
+                {(user.handle || user.displayName) && (
+                  <span className="hidden font-mono text-[11px] text-zinc-400 sm:inline">
+                    {user.handle ? `@${user.handle}` : user.displayName}
+                  </span>
+                )}
+                <button
+                  onClick={handleSignOut}
+                  aria-label="Sign out"
+                  className="text-faint transition-colors hover:text-foreground"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-4 pb-24 sm:px-6">
+        {/* Index strip */}
+        <div className="flex items-center justify-between border-b border-line py-4 font-mono text-[10px] uppercase tracking-[0.25em] text-faint">
+          <span>Portfolio_Index</span>
+          <span>
+            {filteredAndSorted.length === projects.length
+              ? `${projects.length} records`
+              : `${filteredAndSorted.length} / ${projects.length} records`}
+          </span>
+        </div>
+
+        {/* Toolbar */}
+        <section className="flex flex-col items-stretch justify-between gap-4 py-5 md:flex-row md:items-center">
           <div className="relative w-full md:w-96">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
+            <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none font-mono text-xs text-brand">
+              &gt;
+            </span>
             <input
               type="text"
               aria-label="Search projects and technologies"
-              placeholder="Search projects, technologies..."
+              placeholder="search index_"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-zinc-900 border border-zinc-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all placeholder:text-zinc-600"
+              className="w-full border border-line bg-surface py-2 pl-8 pr-3 font-mono text-sm placeholder:text-faint focus:border-brand-dim focus:outline-none"
             />
           </div>
-          <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
-            <Button aria-pressed={sort === 'updated'} variant={sort === 'updated' ? 'default' : 'secondary'} onClick={() => setSort('updated')} className="rounded-xl whitespace-nowrap">
-              Recently Updated
-            </Button>
-            <Button aria-pressed={sort === 'stars'} variant={sort === 'stars' ? 'default' : 'secondary'} onClick={() => setSort('stars')} className="rounded-xl whitespace-nowrap">
-              Most Stars
-            </Button>
-            <Button aria-pressed={sort === 'name'} variant={sort === 'name' ? 'default' : 'secondary'} onClick={() => setSort('name')} className="rounded-xl whitespace-nowrap">
-              Alphabetical
-            </Button>
+
+          <div role="group" aria-label="Sort projects" className="flex w-full divide-x divide-line overflow-x-auto border border-line md:w-auto">
+            {SORTS.map(({ key, label }) => (
+              <button
+                key={key}
+                aria-pressed={sort === key}
+                onClick={() => setSort(key)}
+                className={`px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors whitespace-nowrap ${
+                  sort === key
+                    ? 'bg-raised text-brand'
+                    : 'text-faint hover:text-zinc-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </section>
 
-        {/* Grid Section */}
-        <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {filteredAndSorted.map(project => (
-            <div key={project.id} className="group flex flex-col bg-zinc-900 border border-zinc-800 rounded-2xl p-6 hover:border-indigo-500/50 hover:shadow-2xl hover:shadow-indigo-500/10 transition-all duration-300 relative overflow-hidden">
+        {/* Records grid */}
+        <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {filteredAndSorted.map((project, i) => (
+            <article
+              key={project.id}
+              style={{ animationDelay: `${Math.min(i, 12) * 45}ms` }}
+              className="corner-ticks group relative flex animate-rise flex-col border border-line bg-surface transition-colors hover:border-line-bright"
+            >
+              {/* accent edge on hover */}
+              <span className="absolute inset-y-3 left-0 w-px bg-brand opacity-0 transition-opacity group-hover:opacity-100" />
 
-              {/* Background gradient effect on hover */}
-              <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-
-              <div className="relative z-10 flex justify-between items-start mb-4">
+              <div className="flex items-center justify-between px-5 pt-4">
+                <span className="font-mono text-[10px] tracking-[0.25em] text-faint transition-colors group-hover:text-brand">
+                  R-{String(i + 1).padStart(3, '0')}
+                </span>
                 <div className="flex items-center gap-3">
-                  <Link href={`/project/${project.id}`} className="text-xl font-bold hover:text-indigo-400 transition-colors">
-                    {project.name}
-                  </Link>
-                  <a href={project.html_url} aria-label={`View ${project.name} on GitHub (opens in new tab)`} target="_blank" rel="noreferrer" className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity text-zinc-500 hover:text-white">
-                    <GithubIcon className="w-4 h-4" />
+                  <a
+                    href={project.html_url}
+                    aria-label={`View ${project.name} on GitHub (opens in new tab)`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-faint opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                  >
+                    <GithubIcon className="h-3.5 w-3.5" />
                   </a>
-                </div>
-                <div className="flex items-center gap-1 text-zinc-400 bg-zinc-950 px-2 py-1 rounded-md text-sm border border-zinc-800">
-                  <Star className="w-3.5 h-3.5 text-yellow-500" /> {project.stargazers_count}
+                  <span className="flex items-center gap-1 font-mono text-[11px] text-faint">
+                    <Star className="h-3 w-3 text-amber-300/80" />
+                    {project.stargazers_count}
+                  </span>
                 </div>
               </div>
 
-              {project.summary ? (
-                <p className="text-zinc-300 text-sm leading-relaxed mb-6 flex-grow">
-                  {project.summary}
-                </p>
-              ) : (
-                <div className="mb-6 flex-grow flex flex-col justify-center items-start gap-2">
-                  <p className="text-zinc-500 text-sm italic">{project.description || 'No description available.'}</p>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => handleAIProcess(project.id)} 
-                    disabled={processingId === project.id}
-                    className="text-xs mt-2 border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/10 hover:text-indigo-200"
-                  >
-                    {processingId === project.id ? (
-                      <><RefreshCw className="w-3 h-3 mr-2 animate-spin" /> Processing...</>
-                    ) : (
-                      <>✨ Generate AI Summary</>
-                    )}
-                  </Button>
-                </div>
-              )}
+              <div className="flex flex-grow flex-col px-5 pb-5 pt-2">
+                <Link
+                  href={`/project/${project.id}`}
+                  className="text-lg font-semibold tracking-tight transition-colors hover:text-brand"
+                >
+                  {project.name}
+                </Link>
 
-              <div className="mt-auto pt-4 border-t border-zinc-800/50 relative z-10">
-                <div className="flex justify-between items-center">
-                  <div className="flex flex-wrap gap-2">
-                    {project.technologies && project.technologies.length > 0 ? (
-                      project.technologies.slice(0, 5).map(tech => {
+                {project.summary ? (
+                  <p className="mt-2 flex-grow text-sm leading-relaxed text-zinc-400">
+                    {project.summary}
+                  </p>
+                ) : (
+                  <p className="mt-2 flex-grow text-sm italic text-faint">
+                    {project.description || 'No description available.'}
+                  </p>
+                )}
+              </div>
+
+              <footer className="mt-auto border-t border-line px-5 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    {project.language && (
+                      <span className="flex items-center gap-1.5 whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-zinc-400">
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{ backgroundColor: languageColor(project.language) }}
+                        />
+                        {project.language}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-2">
+                      {(project.technologies || []).slice(0, 5).map(tech => {
                         const iconClass = mapTechToDevicon(tech)
                         return (
-                          <div key={tech} className="group/tooltip relative flex items-center justify-center w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 hover:border-zinc-500 transition-colors">
+                          <span key={tech} className="group/tooltip relative flex items-center">
                             {iconClass ? (
-                              <i className={`${iconClass} text-lg`}></i>
+                              <i className={`${iconClass} text-base text-zinc-500 transition-colors group-hover/tooltip:text-foreground`} />
                             ) : (
-                              <span className="text-[10px] font-mono text-zinc-400">{tech.substring(0, 2).toUpperCase()}</span>
+                              <span
+                                className="font-mono text-[9px] tracking-wider"
+                                style={{ color: languageColor(tech) }}
+                              >
+                                {tech.substring(0, 2).toUpperCase()}
+                              </span>
                             )}
-                            {/* Tooltip */}
-                            <span className="absolute -top-8 bg-zinc-800 text-xs px-2 py-1 rounded opacity-0 group-hover/tooltip:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+                            <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap border border-line bg-raised px-1.5 py-0.5 font-mono text-[10px] text-zinc-300 opacity-0 transition-opacity group-hover/tooltip:opacity-100">
                               {tech}
                             </span>
-                          </div>
+                          </span>
                         )
-                      })
-                    ) : (
-                      project.language && (
-                        <div className="flex items-center gap-1 text-xs text-zinc-400">
-                          <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                          {project.language}
-                        </div>
-                      )
-                    )}
+                      })}
+                    </div>
                   </div>
-
-                  <div className="flex items-center text-xs text-zinc-500">
-                    <Calendar className="w-3.5 h-3.5 mr-1" />
-                    {new Date(project.pushed_at || project.updated_at).toLocaleDateString()}
-                  </div>
+                  <span className="whitespace-nowrap font-mono text-[10px] text-faint">
+                    {isoDate(project.pushed_at || project.updated_at)}
+                  </span>
                 </div>
-              </div>
-
-            </div>
+              </footer>
+            </article>
           ))}
 
           {filteredAndSorted.length === 0 && (
-            <div className="col-span-full py-20 flex flex-col items-center justify-center text-center bg-zinc-900/30 border border-zinc-800 border-dashed rounded-2xl">
-              <GithubIcon className="w-12 h-12 text-zinc-600 mb-4" />
-              <h3 className="text-xl font-medium text-zinc-300">No projects found</h3>
-              <p className="text-zinc-500 mt-2 max-w-md">Try syncing your GitHub account or adjusting your search filters to see your repositories.</p>
-              <Button onClick={handleSync} variant="outline" className="mt-6 border-zinc-700">
-                <RefreshCw className="w-4 h-4 mr-2" /> Sync Now
+            <div className="corner-ticks relative col-span-full flex flex-col items-center justify-center border border-dashed border-line py-20 text-center">
+              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-brand">
+                ERR_NO_RECORDS
+              </span>
+              <h3 className="mt-3 text-lg font-semibold text-zinc-200">No projects found</h3>
+              <p className="mt-1 max-w-md text-sm text-faint">
+                Try syncing your GitHub account or adjusting your search filters to see your repositories.
+              </p>
+              <Button onClick={handleSync} variant="outline" className="mt-6 font-mono text-[11px] uppercase tracking-[0.15em]">
+                <RefreshCw className="h-3.5 w-3.5" /> Sync Now
               </Button>
             </div>
           )}
         </section>
-      </div>
+      </main>
     </div>
   )
 }

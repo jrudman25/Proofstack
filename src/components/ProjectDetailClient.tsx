@@ -2,38 +2,40 @@
 
 import { useState } from 'react'
 import { Project, Todo, Milestone } from '@/types'
-import { CheckCircle2, Circle, Plus, Trash2, ArrowLeft } from 'lucide-react'
+import { Check, Plus, Trash2, ArrowLeft, Star } from 'lucide-react'
+import { GithubIcon } from '@/components/icons/GithubIcon'
 import { Button } from '@/components/ui/button'
+import { languageColor } from '@/lib/language-colors'
 import Link from 'next/link'
 
 // We need an instance of supabase client here if we want to mutate data
 import { createClient } from '@/utils/supabase/client'
 
-export default function ProjectDetailClient({ 
-  project, 
-  initialMilestones, 
-  initialTodos 
-}: { 
-  project: Project, 
-  initialMilestones: Milestone[], 
-  initialTodos: Todo[] 
+export default function ProjectDetailClient({
+  project,
+  initialMilestones,
+  initialTodos
+}: {
+  project: Project,
+  initialMilestones: Milestone[],
+  initialTodos: Todo[]
 }) {
   const supabase = createClient()
   const [todos, setTodos] = useState<Todo[]>(initialTodos)
   const [milestones, setMilestones] = useState<Milestone[]>(initialMilestones)
-  
+
   const [newTodo, setNewTodo] = useState('')
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('')
 
   const handleAddTodo = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newTodo.trim()) return
-    
+
     const { data } = await supabase.from('todos').insert({
       project_id: project.id,
       task: newTodo
     }).select().single()
-    
+
     if (data) {
       setTodos([...todos, data])
       setNewTodo('')
@@ -57,13 +59,13 @@ export default function ProjectDetailClient({
   const handleAddMilestone = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newMilestoneTitle.trim()) return
-    
+
     const { data } = await supabase.from('milestones').insert({
       project_id: project.id,
       title: newMilestoneTitle,
       status: 'pending'
     }).select().single()
-    
+
     if (data) {
       setMilestones([...milestones, data])
       setNewMilestoneTitle('')
@@ -78,94 +80,160 @@ export default function ProjectDetailClient({
     }
   }
 
+  const openMilestones = milestones.filter(m => m.status !== 'completed').length
+  const openTodos = todos.filter(t => !t.is_completed).length
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-white p-8 font-sans">
-      <div className="max-w-5xl mx-auto space-y-8">
-        
-        <Link href="/" className="inline-flex items-center text-zinc-400 hover:text-white transition-colors">
-          <ArrowLeft className="w-4 h-4 mr-2" />
+    <div className="min-h-screen font-sans">
+      <div className="mx-auto max-w-5xl space-y-8 px-6 py-10">
+
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-faint transition-colors hover:text-brand"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
           Back to Dashboard
         </Link>
 
-        <header className="pb-6 border-b border-zinc-800">
-          <h1 className="text-4xl font-bold">{project.name}</h1>
-          <p className="text-zinc-400 mt-2">{project.description}</p>
+        <header className="corner-ticks relative border border-line bg-surface px-6 py-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-faint">
+                Record // {project.full_name}
+              </p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight">{project.name}</h1>
+              {project.description && (
+                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">{project.description}</p>
+              )}
+            </div>
+            <a
+              href={project.html_url}
+              aria-label={`View ${project.name} on GitHub (opens in new tab)`}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 border border-line px-3 py-2 font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-400 transition-colors hover:border-line-bright hover:text-foreground"
+            >
+              <GithubIcon className="h-3.5 w-3.5" />
+              Source
+            </a>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line pt-4 font-mono text-[10px] uppercase tracking-[0.15em] text-faint">
+            {project.language && (
+              <span className="flex items-center gap-1.5 text-zinc-400">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: languageColor(project.language) }} />
+                {project.language}
+              </span>
+            )}
+            <span className="flex items-center gap-1.5">
+              <Star className="h-3 w-3 text-amber-300/80" />
+              {project.stargazers_count}
+            </span>
+            {(project.technologies || []).slice(0, 6).map(tech => (
+              <span key={tech} style={{ color: languageColor(tech) }}>{tech}</span>
+            ))}
+          </div>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+
           {/* Milestones */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            <h2 className="text-2xl font-semibold mb-6 flex items-center justify-between">
+          <div className="corner-ticks relative border border-line bg-surface p-6">
+            <h2 className="flex items-baseline justify-between font-mono text-[11px] uppercase tracking-[0.25em] text-zinc-300">
               Milestones
+              <span className="font-mono text-[10px] tracking-[0.15em] text-faint">
+                {String(openMilestones).padStart(2, '0')} open
+              </span>
             </h2>
-            
-            <div className="space-y-4 mb-6">
+
+            <div className="mb-6 mt-5 space-y-2">
               {milestones.length === 0 ? (
-                <p className="text-zinc-500 italic">No milestones yet.</p>
+                <p className="font-mono text-[11px] italic text-faint">No milestones yet.</p>
               ) : (
-                milestones.map(milestone => (
-                  <div key={milestone.id} className="flex items-start gap-3 p-3 bg-zinc-950 rounded-xl border border-zinc-800/50">
-                    <button aria-label={`Complete milestone: ${milestone.title}`} aria-pressed={milestone.status === 'completed'} onClick={() => handleToggleMilestone(milestone.id, milestone.status)} className="mt-1 flex-shrink-0">
-                      {milestone.status === 'completed' ? (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                      ) : (
-                        <Circle className="w-5 h-5 text-zinc-500 hover:text-indigo-400 transition-colors" />
-                      )}
+                milestones.map((milestone, i) => (
+                  <div key={milestone.id} className="flex items-start gap-3 border border-line/60 bg-ink px-3 py-2.5">
+                    <button
+                      aria-label={`Complete milestone: ${milestone.title}`}
+                      aria-pressed={milestone.status === 'completed'}
+                      onClick={() => handleToggleMilestone(milestone.id, milestone.status)}
+                      className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center border transition-colors ${
+                        milestone.status === 'completed'
+                          ? 'border-brand bg-brand/15'
+                          : 'border-line-bright hover:border-brand'
+                      }`}
+                    >
+                      {milestone.status === 'completed' && <Check className="h-3 w-3 text-brand" />}
                     </button>
-                    <div>
-                      <h3 className={`font-medium ${milestone.status === 'completed' ? 'text-zinc-500 line-through' : 'text-zinc-200'}`}>
-                        {milestone.title}
-                      </h3>
-                    </div>
+                    <span className="mt-0.5 font-mono text-[10px] tracking-[0.2em] text-faint">
+                      M-{String(i + 1).padStart(2, '0')}
+                    </span>
+                    <h3 className={`text-sm ${milestone.status === 'completed' ? 'text-faint line-through' : 'text-zinc-200'}`}>
+                      {milestone.title}
+                    </h3>
                   </div>
                 ))
               )}
             </div>
 
             <form aria-label="Add milestone" onSubmit={handleAddMilestone} className="flex gap-2">
-              <input 
-                type="text" 
-                aria-label="New milestone"
-                placeholder="New milestone..." 
-                value={newMilestoneTitle}
-                onChange={e => setNewMilestoneTitle(e.target.value)}
-                className="flex-1 px-4 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-              />
-              <Button type="submit" variant="secondary">Add</Button>
+              <div className="relative flex-1">
+                <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none font-mono text-xs text-brand">
+                  &gt;
+                </span>
+                <input
+                  type="text"
+                  aria-label="New milestone"
+                  placeholder="New milestone..."
+                  value={newMilestoneTitle}
+                  onChange={e => setNewMilestoneTitle(e.target.value)}
+                  className="w-full border border-line bg-ink py-2 pl-8 pr-3 font-mono text-sm placeholder:text-faint focus:border-brand-dim focus:outline-none"
+                />
+              </div>
+              <Button type="submit" variant="secondary" className="font-mono text-[11px] uppercase tracking-[0.15em]">Add</Button>
             </form>
           </div>
 
           {/* Todos */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            <h2 className="text-2xl font-semibold mb-6 flex items-center justify-between">
+          <div className="corner-ticks relative border border-line bg-surface p-6">
+            <h2 className="flex items-baseline justify-between font-mono text-[11px] uppercase tracking-[0.25em] text-zinc-300">
               To-Do List
+              <span className="font-mono text-[10px] tracking-[0.15em] text-faint">
+                {String(openTodos).padStart(2, '0')} open
+              </span>
             </h2>
-            
-            <div className="space-y-3 mb-6 max-h-[400px] overflow-y-auto pr-2">
+
+            <div className="mb-6 mt-5 max-h-[400px] space-y-1 overflow-y-auto pr-2">
               {todos.length === 0 ? (
-                <p className="text-zinc-500 italic">No tasks yet.</p>
+                <p className="font-mono text-[11px] italic text-faint">No tasks yet.</p>
               ) : (
-                todos.map(todo => (
-                  <div key={todo.id} className="flex items-center justify-between group p-2 hover:bg-zinc-950 rounded-lg transition-colors">
+                todos.map((todo, i) => (
+                  <div key={todo.id} className="group flex items-center justify-between px-2 py-1.5 transition-colors hover:bg-ink">
                     <div className="flex items-center gap-3">
-                      <button aria-label={`Complete task: ${todo.task}`} aria-pressed={todo.is_completed} onClick={() => handleToggleTodo(todo.id, todo.is_completed)}>
-                        {todo.is_completed ? (
-                          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                        ) : (
-                          <Circle className="w-5 h-5 text-zinc-500 hover:text-indigo-400" />
-                        )}
+                      <button
+                        aria-label={`Complete task: ${todo.task}`}
+                        aria-pressed={todo.is_completed}
+                        onClick={() => handleToggleTodo(todo.id, todo.is_completed)}
+                        className={`flex h-4 w-4 flex-shrink-0 items-center justify-center border transition-colors ${
+                          todo.is_completed
+                            ? 'border-brand bg-brand/15'
+                            : 'border-line-bright hover:border-brand'
+                        }`}
+                      >
+                        {todo.is_completed && <Check className="h-3 w-3 text-brand" />}
                       </button>
-                      <span className={`${todo.is_completed ? 'text-zinc-500 line-through' : 'text-zinc-300'}`}>
+                      <span className="font-mono text-[10px] tracking-[0.2em] text-faint">
+                        T-{String(i + 1).padStart(2, '0')}
+                      </span>
+                      <span className={`text-sm ${todo.is_completed ? 'text-faint line-through' : 'text-zinc-300'}`}>
                         {todo.task}
                       </span>
                     </div>
-                    <button 
+                    <button
                       aria-label={`Delete task: ${todo.task}`}
                       onClick={() => handleDeleteTodo(todo.id)}
-                      className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 p-1 text-zinc-500 hover:text-red-400 transition-all"
+                      className="p-1 text-faint opacity-0 transition-all hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 ))
@@ -173,15 +241,22 @@ export default function ProjectDetailClient({
             </div>
 
             <form aria-label="Add task" onSubmit={handleAddTodo} className="flex gap-2">
-              <input 
-                type="text" 
-                aria-label="New task"
-                placeholder="New task..." 
-                value={newTodo}
-                onChange={e => setNewTodo(e.target.value)}
-                className="flex-1 px-4 py-2 bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-              />
-              <Button type="submit" variant="secondary"><Plus className="w-4 h-4 mr-1" /> Add</Button>
+              <div className="relative flex-1">
+                <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none font-mono text-xs text-brand">
+                  &gt;
+                </span>
+                <input
+                  type="text"
+                  aria-label="New task"
+                  placeholder="New task..."
+                  value={newTodo}
+                  onChange={e => setNewTodo(e.target.value)}
+                  className="w-full border border-line bg-ink py-2 pl-8 pr-3 font-mono text-sm placeholder:text-faint focus:border-brand-dim focus:outline-none"
+                />
+              </div>
+              <Button type="submit" variant="secondary" className="font-mono text-[11px] uppercase tracking-[0.15em]">
+                <Plus className="h-3.5 w-3.5" /> Add
+              </Button>
             </form>
           </div>
 

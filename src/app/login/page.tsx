@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { GithubIcon } from '@/components/icons/GithubIcon'
+import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
 
 export default function LoginPage() {
@@ -18,24 +19,38 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-24 bg-zinc-950 text-white">
-      <div className="w-full max-w-md p-8 space-y-8 bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-white">Welcome to Proofstack</h1>
-          <p className="mt-2 text-zinc-400">Manage your GitHub portfolio with AI.</p>
-        </div>
-
-        <div className="mt-8">
-          <Button
-            onClick={handleGithubLogin}
-            className="w-full flex items-center justify-center gap-2 bg-white text-zinc-950 hover:bg-zinc-200"
-            size="lg"
-          >
-            <GithubIcon className="w-5 h-5" />
-            Sign in with GitHub
-          </Button>
-        </div>
+    <div className="flex min-h-screen flex-col items-center justify-center p-6 font-sans">
+      <div className="mb-10 flex items-center gap-3">
+        <Logo className="h-8 w-8 text-brand" />
+        <span className="font-mono text-base font-bold uppercase tracking-[0.35em]">
+          Proofstack
+        </span>
       </div>
+
+      <div className="corner-ticks relative w-full max-w-md border border-line bg-surface p-8">
+        <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-brand">
+          Auth // GitHub_OAuth
+        </p>
+        <h1 className="mt-4 text-2xl font-semibold tracking-tight">
+          Sign in to index your work
+        </h1>
+        <p className="mt-3 text-sm leading-relaxed text-zinc-400">
+          Proofstack syncs your repositories, extracts stack metadata, and answers questions from indexed READMEs.
+        </p>
+
+        <Button
+          onClick={handleGithubLogin}
+          size="lg"
+          className="mt-8 w-full font-mono text-[12px] uppercase tracking-[0.15em]"
+        >
+          <GithubIcon className="h-4 w-4" />
+          Sign in with GitHub
+        </Button>
+      </div>
+
+      <p className="mt-8 text-center font-mono text-[10px] uppercase tracking-[0.2em] text-faint">
+        scopes: repo · read:user · admin:repo_hook
+      </p>
     </div>
   )
 }
