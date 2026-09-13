@@ -4,6 +4,9 @@ import { originEnv } from './src/lib/env-validation';
 const nextConfig: NextConfig = {
   /* config options here */
   poweredByHeader: false,
+  images: {
+    remotePatterns: [{ protocol: 'https', hostname: 'avatars.githubusercontent.com' }],
+  },
   async headers() {
     const development = process.env.NODE_ENV === 'development';
     const supabase = process.env.NEXT_PUBLIC_SUPABASE_URL
