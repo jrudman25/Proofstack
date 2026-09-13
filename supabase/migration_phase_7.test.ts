@@ -5,6 +5,7 @@ import { expect, it } from 'vitest'
 const sql = (name: string) => readFileSync(resolve(process.cwd(), 'supabase', name), 'utf8').toLowerCase()
 const migration = sql('migrations/20260906000000_production_hardening.sql')
 const credentialsMigration = sql('migrations/20260909000000_github_credentials.sql')
+const projectBriefsMigration = sql('migrations/20260912000000_project_briefs.sql')
 const setup = sql('setup.sql')
 const functions = sql('functions.sql')
 
@@ -27,6 +28,20 @@ it('keeps GitHub credentials encrypted and inaccessible to browser roles', () =>
   }
   expect(credentialsMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
   expect(credentialsMigration).toContain('on delete cascade')
+})
+it('adds owner-isolated project briefs without changing legacy project data', () => {
+  for (const text of [setup, projectBriefsMigration]) {
+    expect(text).toContain('project_briefs')
+    expect(text).toContain("visibility in ('private', 'public')")
+    expect(text).toContain("lifecycle_status in ('prototype', 'active', 'maintained', 'completed', 'archived')")
+    expect(text).toContain("ai_draft jsonb default '{}'::jsonb not null")
+    expect(text).toContain('enable row level security')
+    expect(text).toMatch(/projects\.user_id = auth\.uid\(\)/)
+  }
+  expect(projectBriefsMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
+  expect(projectBriefsMigration).not.toMatch(/\bdelete\s+from\b|\btruncate\b|\bdrop\s+table\b|\bdisable\s+row\s+level\s+security\b|\bdrop\s+policy\b/)
+  expect(projectBriefsMigration).toContain('create table if not exists')
+  expect(projectBriefsMigration).toContain('if not exists (select 1 from pg_policies')
 })
 it('aligns fresh setup and migration uniqueness, cosine search and indexes', () => {
   for (const text of [setup, migration]) {

@@ -37,6 +37,26 @@ create table projects (
   unique(user_id, github_repo_id)
 );
 
+create table project_briefs (
+  project_id uuid references projects(id) on delete cascade primary key,
+  visibility text check (visibility in ('private', 'public')) default 'private' not null,
+  lifecycle_status text check (lifecycle_status in ('prototype', 'active', 'maintained', 'completed', 'archived')),
+  purpose text,
+  inspiration text,
+  role_and_contributions text,
+  architecture_and_decisions text,
+  challenges_and_solutions text,
+  outcomes_and_impact text,
+  lessons_learned text,
+  interview_talking_points text,
+  owner_verified_at timestamp with time zone,
+  last_reviewed_at timestamp with time zone,
+  ai_draft jsonb default '{}'::jsonb not null,
+  ai_draft_generated_at timestamp with time zone,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- Create milestones table
 create table milestones (
   id uuid default gen_random_uuid() primary key,
@@ -81,6 +101,7 @@ alter table github_credentials enable row level security;
 revoke all on table github_credentials from anon, authenticated;
 grant select, insert, update, delete on table github_credentials to service_role;
 alter table projects enable row level security;
+alter table project_briefs enable row level security;
 alter table milestones enable row level security;
 alter table todos enable row level security;
 alter table project_embeddings enable row level security;
@@ -94,6 +115,21 @@ create policy "Users can view own projects" on projects for select using (auth.u
 create policy "Users can insert own projects" on projects for insert with check (auth.uid() = user_id);
 create policy "Users can update own projects" on projects for update using (auth.uid() = user_id);
 create policy "Users can delete own projects" on projects for delete using (auth.uid() = user_id);
+
+create policy "Users can view own project briefs" on project_briefs for select using (
+  exists (select 1 from projects where projects.id = project_briefs.project_id and projects.user_id = auth.uid())
+);
+create policy "Users can insert own project briefs" on project_briefs for insert with check (
+  exists (select 1 from projects where projects.id = project_briefs.project_id and projects.user_id = auth.uid())
+);
+create policy "Users can update own project briefs" on project_briefs for update using (
+  exists (select 1 from projects where projects.id = project_briefs.project_id and projects.user_id = auth.uid())
+) with check (
+  exists (select 1 from projects where projects.id = project_briefs.project_id and projects.user_id = auth.uid())
+);
+create policy "Users can delete own project briefs" on project_briefs for delete using (
+  exists (select 1 from projects where projects.id = project_briefs.project_id and projects.user_id = auth.uid())
+);
 
 -- Milestones policies
 create policy "Users can view own project milestones" on milestones for select using (
