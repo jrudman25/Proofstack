@@ -12,8 +12,8 @@ export default function LoginPage() {
       provider: 'github',
       options: {
         redirectTo: `${location.origin}/auth/callback`,
-        // Request additional scopes to access repositories and webhooks
-        scopes: 'repo read:user user:email admin:repo_hook'
+        // `repo` is required to read private repositories; webhooks are configured manually.
+        scopes: 'repo read:user user:email'
       },
     })
   }
@@ -22,34 +22,31 @@ export default function LoginPage() {
     <div className="flex min-h-screen flex-col items-center justify-center p-6 font-sans">
       <div className="mb-10 flex items-center gap-3">
         <Logo className="h-8 w-8 text-brand" />
-        <span className="font-mono text-base font-bold uppercase tracking-[0.35em]">
+        <span className="label text-base font-bold tracking-[0.35em]">
           Proofstack
         </span>
       </div>
 
       <div className="corner-ticks relative w-full max-w-md border border-line bg-surface p-8">
-        <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-brand">
-          Auth // GitHub_OAuth
-        </p>
-        <h1 className="mt-4 text-2xl font-semibold tracking-tight">
-          Sign in to index your work
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Know your own work before the interview
         </h1>
-        <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-          Proofstack syncs your repositories, extracts stack metadata, and answers questions from indexed READMEs.
+        <p className="mt-3 text-sm leading-relaxed text-dim">
+          Proofstack turns your GitHub repositories and your own notes into an evidence-backed briefing you can talk through.
         </p>
 
         <Button
           onClick={handleGithubLogin}
           size="lg"
-          className="mt-8 w-full font-mono text-[12px] uppercase tracking-[0.15em]"
+          className="label mt-8 w-full"
         >
           <GithubIcon className="h-4 w-4" />
           Sign in with GitHub
         </Button>
       </div>
 
-      <p className="mt-8 text-center font-mono text-[10px] uppercase tracking-[0.2em] text-faint">
-        scopes: repo · read:user · admin:repo_hook
+      <p className="eyebrow mt-8 text-center text-faint">
+        GitHub access: repo · read:user · user:email
       </p>
     </div>
   )

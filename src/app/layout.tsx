@@ -15,11 +15,9 @@ const spaceMono = Space_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Proofstack - AI Powered Portfolio',
-  description: 'Manage and sync your GitHub projects with Gemini AI.',
+  title: 'Proofstack',
+  description: 'Understand, remember, and explain your GitHub project work with evidence-backed portfolio briefings.',
 }
-
-import ChatWidget from '@/components/ChatWidget'
 
 export default function RootLayout({
   children,
@@ -30,7 +28,6 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={`${spaceGrotesk.variable} ${spaceMono.variable} antialiased bg-ink text-foreground selection:bg-brand selection:text-on-brand`}>
         {children}
-        <ChatWidget />
       </body>
     </html>
   )

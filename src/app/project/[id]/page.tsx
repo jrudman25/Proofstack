@@ -29,6 +29,12 @@ export default async function ProjectPage({
     redirect('/')
   }
 
+  const { data: brief } = await supabase
+    .from('project_briefs')
+    .select('*')
+    .eq('project_id', id)
+    .maybeSingle()
+
   // Fetch milestones
   const { data: milestones } = await supabase
     .from('milestones')
@@ -44,10 +50,11 @@ export default async function ProjectPage({
     .order('created_at', { ascending: true })
 
   return (
-    <ProjectDetailClient 
-      project={project} 
-      initialMilestones={milestones || []} 
-      initialTodos={todos || []} 
+    <ProjectDetailClient
+      project={project}
+      initialBrief={brief}
+      initialMilestones={milestones || []}
+      initialTodos={todos || []}
     />
   )
 }

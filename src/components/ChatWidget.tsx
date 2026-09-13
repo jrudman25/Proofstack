@@ -3,9 +3,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { MessageSquare, X, Send, Bot } from 'lucide-react'
 
-export default function ChatWidget() {
+// When mounted with a projectId, questions are answered from that project's
+// evidence only; otherwise the whole portfolio is in scope.
+export default function ChatWidget({ projectId, projectName }: { projectId?: string; projectName?: string } = {}) {
   const [isOpen, setIsOpen] = useState(false)
-  const [messages, setMessages] = useState<{ role: string, content: string }[]>([])
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant', content: string }[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -33,7 +35,7 @@ export default function ChatWidget() {
     e?.preventDefault()
     if (!input.trim() || isLoading) return
 
-    const newMessages = [...messages, { role: 'user', content: input }]
+    const newMessages = [...messages, { role: 'user' as const, content: input }]
     setMessages(newMessages)
     setInput('')
     setIsLoading(true)
@@ -42,7 +44,7 @@ export default function ChatWidget() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages })
+        body: JSON.stringify(projectId ? { messages: newMessages, projectId } : { messages: newMessages })
       })
 
       const data = await res.json()
@@ -59,7 +61,7 @@ export default function ChatWidget() {
     <>
       <button
         ref={launcherRef}
-        aria-label="Open chat"
+        aria-label={projectName ? `Ask about ${projectName}` : 'Ask about your portfolio'}
         aria-expanded={isOpen}
         aria-controls="portfolio-chat"
         aria-hidden={isOpen}
@@ -75,12 +77,12 @@ export default function ChatWidget() {
         <div className="flex items-center justify-between border-b border-line p-3">
           <div className="flex items-center gap-2">
             <Bot className="h-4 w-4 text-brand" />
-            <h3 id="chat-title" className="font-mono text-[11px] uppercase tracking-[0.2em] text-zinc-300">
-              Proofstack_Chat
+            <h3 id="chat-title" className="label text-dim">
+              {projectName ? `Ask about ${projectName}` : 'Ask about your portfolio'}
             </h3>
           </div>
           <div className="flex items-center gap-3">
-            <kbd className="hidden border border-line px-1.5 py-0.5 font-mono text-[9px] uppercase text-faint sm:inline">esc</kbd>
+            <kbd className="hidden border border-line px-1.5 py-0.5 font-mono text-[10px] uppercase text-faint sm:inline">esc</kbd>
             <button aria-label="Close chat" onClick={closeChat} className="text-faint transition-colors hover:text-foreground">
               <X className="h-4 w-4" />
             </button>
@@ -91,9 +93,10 @@ export default function ChatWidget() {
         <div role="log" aria-label="Chat messages" aria-live="polite" className="flex-1 space-y-3 overflow-y-auto p-4">
           {messages.length === 0 && (
             <div className="mt-10 text-center">
-              <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-brand">Ask // README_Index</p>
-              <p className="mx-auto mt-3 max-w-[260px] text-sm text-faint">
-                Ask about your portfolio using indexed repository metadata and README evidence.
+              <p className="mx-auto max-w-[260px] text-sm text-faint">
+                {projectName
+                  ? `Answers use only ${projectName}'s repository metadata and README evidence.`
+                  : 'Answers use your synced repository metadata and README evidence, with no outside knowledge.'}
               </p>
             </div>
           )}
@@ -101,11 +104,11 @@ export default function ChatWidget() {
             <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] border px-3.5 py-2 ${
                 msg.role === 'user'
-                  ? 'border-brand-dim bg-brand/10 text-zinc-100'
-                  : 'border-line bg-raised text-zinc-300'
+                  ? 'border-brand-dim bg-brand/10 text-foreground'
+                  : 'border-line bg-raised text-foreground/90'
               }`}>
-                <span className={`mb-1 block font-mono text-[9px] uppercase tracking-[0.2em] ${msg.role === 'user' ? 'text-brand' : 'text-faint'}`}>
-                  {msg.role === 'user' ? 'you' : 'stack'}
+                <span className={`eyebrow mb-1 block ${msg.role === 'user' ? 'text-brand' : 'text-faint'}`}>
+                  {msg.role === 'user' ? 'You' : 'Proofstack'}
                 </span>
                 <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
               </div>
@@ -136,7 +139,7 @@ export default function ChatWidget() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Ask a question..."
-              className="w-full border border-line bg-surface py-2 pl-8 pr-3 font-mono text-sm placeholder:text-faint focus:border-brand-dim focus:outline-none"
+              className="field bg-surface py-2 pl-8 pr-3"
             />
           </div>
           <button

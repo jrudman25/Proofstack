@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { Project } from '@/types'
 import { RefreshCw, Star, LogOut } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/GithubIcon'
@@ -8,24 +9,85 @@ import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/utils/supabase/client'
 import { languageColor } from '@/lib/language-colors'
+import { clientErrorMessage } from '@/lib/client-error-message'
 import Link from 'next/link'
 import Image from 'next/image'
+import PortfolioBriefingPanel from '@/components/PortfolioBriefingPanel'
+import ChatWidget from '@/components/ChatWidget'
 
-const mapTechToDevicon = (tech: string) => {
-  const t = tech.toLowerCase()
-  if (t.includes('react')) return 'devicon-react-original'
-  if (t.includes('next')) return 'devicon-nextjs-original'
-  if (t.includes('node') || t.includes('express')) return 'devicon-nodejs-plain'
-  if (t.includes('typescript') || t === 'ts') return 'devicon-typescript-plain'
-  if (t.includes('javascript') || t === 'js') return 'devicon-javascript-plain'
-  if (t.includes('python')) return 'devicon-python-plain'
-  if (t.includes('go')) return 'devicon-go-original-wordmark'
-  if (t.includes('rust')) return 'devicon-rust-original'
-  if (t.includes('postgres') || t.includes('sql')) return 'devicon-postgresql-plain'
-  if (t.includes('tailwind')) return 'devicon-tailwindcss-original'
-  if (t.includes('html')) return 'devicon-html5-plain'
-  if (t.includes('css')) return 'devicon-css3-plain'
-  return null
+// Keys are technology names normalized to lowercase alphanumerics so that
+// "Next.js", "NextJS" and "nextjs" resolve to the same icon without substring
+// matching (which mapped MongoDB to Go and MySQL to PostgreSQL).
+const DEVICON_BY_TECHNOLOGY: Record<string, string> = {
+  react: 'devicon-react-original',
+  nextjs: 'devicon-nextjs-original',
+  next: 'devicon-nextjs-original',
+  node: 'devicon-nodejs-plain',
+  nodejs: 'devicon-nodejs-plain',
+  express: 'devicon-express-original',
+  typescript: 'devicon-typescript-plain',
+  ts: 'devicon-typescript-plain',
+  javascript: 'devicon-javascript-plain',
+  js: 'devicon-javascript-plain',
+  python: 'devicon-python-plain',
+  go: 'devicon-go-original-wordmark',
+  golang: 'devicon-go-original-wordmark',
+  rust: 'devicon-rust-original',
+  postgresql: 'devicon-postgresql-plain',
+  postgres: 'devicon-postgresql-plain',
+  mysql: 'devicon-mysql-plain',
+  mongodb: 'devicon-mongodb-plain',
+  tailwindcss: 'devicon-tailwindcss-original',
+  html: 'devicon-html5-plain',
+  html5: 'devicon-html5-plain',
+  css: 'devicon-css3-plain',
+  css3: 'devicon-css3-plain',
+  vue: 'devicon-vuejs-plain',
+  svelte: 'devicon-svelte-plain',
+  angular: 'devicon-angularjs-plain',
+  docker: 'devicon-docker-plain',
+  supabase: 'devicon-supabase-plain',
+  firebase: 'devicon-firebase-plain',
+  vite: 'devicon-vitejs-plain',
+  mui: 'devicon-materialui-plain',
+  materialui: 'devicon-materialui-plain',
+  reactrouter: 'devicon-reactrouter-plain',
+  redux: 'devicon-redux-original',
+  sass: 'devicon-sass-original',
+  webpack: 'devicon-webpack-plain',
+  babel: 'devicon-babel-plain',
+  bootstrap: 'devicon-bootstrap-plain',
+  reactbootstrap: 'devicon-reactbootstrap-original',
+  storybook: 'devicon-storybook-plain',
+  eslint: 'devicon-eslint-plain',
+  nuxt: 'devicon-nuxtjs-plain',
+  astro: 'devicon-astro-plain',
+  gatsby: 'devicon-gatsby-original',
+  fastify: 'devicon-fastify-plain',
+  electron: 'devicon-electron-original',
+  prisma: 'devicon-prisma-original',
+  vitest: 'devicon-vitest-plain',
+  jest: 'devicon-jest-plain',
+  playwright: 'devicon-playwright-plain',
+  cypress: 'devicon-cypressio-plain',
+  nestjs: 'devicon-nestjs-original',
+  remix: 'devicon-remix-original',
+  sveltekit: 'devicon-svelte-plain',
+  cloudflare: 'devicon-cloudflare-plain',
+}
+
+const normalizeTechnology = (technology: string) => technology.toLowerCase().replace(/[^a-z0-9]+/g, '')
+const deviconFor = (tech: string) => DEVICON_BY_TECHNOLOGY[normalizeTechnology(tech)] ?? null
+
+const stackTechnologies = (project: Project) => {
+  const technologies = new Map<string, string>()
+  for (const candidate of [project.language, ...(project.technologies || [])]) {
+    const technology = candidate?.trim()
+    if (!technology) continue
+    const normalized = normalizeTechnology(technology)
+    if (!technologies.has(normalized)) technologies.set(normalized, technology)
+  }
+  return Array.from(technologies.values())
 }
 
 const SORTS = [
@@ -40,10 +102,10 @@ type DashboardUser = {
   avatarUrl: string | null
 }
 
-const isoDate = (value: string | null) => {
-  if (!value) return '----.--.--'
+const isoDate = (value: string | null | undefined) => {
+  if (!value) return null
   const d = new Date(value)
-  return Number.isNaN(d.getTime()) ? '----.--.--' : d.toISOString().slice(0, 10)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
 }
 
 export default function Dashboard({
@@ -53,11 +115,19 @@ export default function Dashboard({
   initialProjects: Project[]
   user?: DashboardUser | null
 }) {
+  const router = useRouter()
   const [projects] = useState<Project[]>(initialProjects)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'updated' | 'stars' | 'name'>('updated')
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
+
+  // Sync stamps every upserted row with the current time, so the newest
+  // updated_at is the most recent completed sync.
+  const lastSyncedAt = useMemo(() => {
+    const times = projects.map(p => new Date(p.updated_at).getTime()).filter(Number.isFinite)
+    return times.length ? isoDate(new Date(Math.max(...times)).toISOString()) : null
+  }, [projects])
 
   const handleSync = async () => {
     setIsSyncing(true)
@@ -66,11 +136,10 @@ export default function Dashboard({
       const res = await fetch('/api/sync', { method: 'POST' })
       const data = await res.json()
       if (res.ok) {
-        setSyncMessage(`Synced ${data.syncedCount} projects. Refreshing...`)
-        // In a real app, we would re-fetch projects from Supabase here
-        window.location.reload()
+        setSyncMessage(`Synced ${data.syncedCount} projects.`)
+        router.refresh()
       } else {
-        setSyncMessage('Unable to sync projects. Please try again.')
+        setSyncMessage(clientErrorMessage(res, data, 'Unable to sync projects. Please try again.'))
       }
     } catch {
       setSyncMessage('Unable to sync projects. Please try again.')
@@ -108,122 +177,129 @@ export default function Dashboard({
 
   return (
     <div className="min-h-screen font-sans">
-      {/* Top bar */}
       <header className="sticky top-0 z-40 border-b border-line bg-ink/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
             <Logo className="h-6 w-6 text-brand" />
-            <h1 className="hidden font-mono text-sm font-bold uppercase tracking-[0.3em] sm:block">
-              Proofstack
-            </h1>
+            <h1 className="label font-bold tracking-[0.3em]">Proofstack</h1>
           </div>
 
-          <div className="flex items-center gap-3">
-            {syncMessage && (
-              <span role="status" className="hidden font-mono text-[11px] text-faint sm:inline">
-                {syncMessage}
-              </span>
-            )}
-            <Button
-              onClick={handleSync}
-              disabled={isSyncing}
-              aria-label="Sync GitHub"
-              className="font-mono text-[10px] uppercase tracking-[0.12em] sm:text-[11px] sm:tracking-[0.15em]"
-            >
-              <RefreshCw className={isSyncing ? 'animate-spin' : ''} />
-              <span className="hidden sm:inline">Sync GitHub</span>
-              <span className="sm:hidden">Sync</span>
-            </Button>
-
-            {user && (
-              <div className="flex items-center gap-3 border-l border-line pl-4">
-                {user.avatarUrl && (
-                  <Image
-                    src={user.avatarUrl}
-                    alt=""
-                    width={28}
-                    height={28}
-                    className="h-7 w-7 border border-line"
-                  />
-                )}
-                {(user.handle || user.displayName) && (
-                  <span className="hidden font-mono text-[11px] text-zinc-400 sm:inline">
-                    {user.handle ? `@${user.handle}` : user.displayName}
-                  </span>
-                )}
-                <button
-                  onClick={handleSignOut}
-                  aria-label="Sign out"
-                  className="text-faint transition-colors hover:text-foreground"
-                >
-                  <LogOut className="h-4 w-4" />
-                </button>
-              </div>
-            )}
-          </div>
+          {user && (
+            <div className="flex items-center gap-3">
+              {user.avatarUrl && (
+                <Image
+                  src={user.avatarUrl}
+                  alt=""
+                  width={28}
+                  height={28}
+                  className="h-7 w-7 border border-line"
+                />
+              )}
+              {(user.handle || user.displayName) && (
+                <span className="hidden font-mono text-[11px] text-dim sm:inline">
+                  {user.handle ? `@${user.handle}` : user.displayName}
+                </span>
+              )}
+              <button
+                onClick={handleSignOut}
+                aria-label="Sign out"
+                className="text-faint transition-colors hover:text-foreground"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 pb-24 sm:px-6">
-        {/* Index strip */}
-        <div className="flex items-center justify-between border-b border-line py-4 font-mono text-[10px] uppercase tracking-[0.25em] text-faint">
-          <span>Portfolio_Index</span>
-          <span>
-            {filteredAndSorted.length === projects.length
-              ? `${projects.length} records`
-              : `${filteredAndSorted.length} / ${projects.length} records`}
-          </span>
-        </div>
+        <PortfolioBriefingPanel projectCount={projects.length} />
 
-        {/* Toolbar */}
-        <section className="flex flex-col items-stretch justify-between gap-4 py-5 md:flex-row md:items-center">
-          <div className="relative w-full md:w-96">
-            <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none font-mono text-xs text-brand">
-              &gt;
-            </span>
-            <input
-              type="text"
-              aria-label="Search projects and technologies"
-              placeholder="search index_"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full border border-line bg-surface py-2 pl-8 pr-3 font-mono text-sm placeholder:text-faint focus:border-brand-dim focus:outline-none"
-            />
+        {/* Projects toolbar: heading and count, search, sort, sync */}
+        <section aria-labelledby="projects-heading" className="mt-10 border-b border-line pb-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-baseline gap-3">
+              <h2 id="projects-heading" className="label text-foreground">Projects</h2>
+              <span className="font-mono text-[11px] text-faint">
+                {filteredAndSorted.length === projects.length
+                  ? projects.length
+                  : `${filteredAndSorted.length} / ${projects.length}`}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="relative w-full sm:w-72">
+                <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none font-mono text-xs text-brand">
+                  &gt;
+                </span>
+                <input
+                  type="text"
+                  aria-label="Search projects and technologies"
+                  placeholder="Search projects"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="field bg-surface py-2 pl-8 pr-3"
+                />
+              </div>
+
+              <div role="group" aria-label="Sort projects" className="flex divide-x divide-line overflow-x-auto border border-line">
+                {SORTS.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    aria-pressed={sort === key}
+                    onClick={() => setSort(key)}
+                    className={`eyebrow whitespace-nowrap px-3 py-2 transition-colors ${
+                      sort === key ? 'bg-raised text-brand' : 'text-faint hover:text-dim'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-3 sm:border-l sm:border-line sm:pl-3">
+                <Button
+                  onClick={handleSync}
+                  disabled={isSyncing}
+                  variant="outline"
+                  aria-label="Sync GitHub"
+                  className="eyebrow"
+                >
+                  <RefreshCw className={isSyncing ? 'animate-spin' : ''} />
+                  Sync GitHub
+                </Button>
+                {lastSyncedAt && (
+                  <span className="whitespace-nowrap font-mono text-[10px] text-faint">Synced {lastSyncedAt}</span>
+                )}
+              </div>
+            </div>
           </div>
 
-          <div role="group" aria-label="Sort projects" className="flex w-full divide-x divide-line overflow-x-auto border border-line md:w-auto">
-            {SORTS.map(({ key, label }) => (
-              <button
-                key={key}
-                aria-pressed={sort === key}
-                onClick={() => setSort(key)}
-                className={`px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors whitespace-nowrap ${
-                  sort === key
-                    ? 'bg-raised text-brand'
-                    : 'text-faint hover:text-zinc-300'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          {syncMessage && (
+            <p role="status" className="mt-3 font-mono text-[11px] text-dim">{syncMessage}</p>
+          )}
         </section>
 
-        {/* Records grid */}
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {/* Project cards */}
+        <section className="grid grid-cols-1 gap-4 pt-6 md:grid-cols-2 xl:grid-cols-3">
           {filteredAndSorted.map((project, i) => (
             <article
               key={project.id}
               style={{ animationDelay: `${Math.min(i, 12) * 45}ms` }}
               className="corner-ticks group relative flex animate-rise flex-col border border-line bg-surface transition-colors hover:border-line-bright"
             >
-              {/* accent edge on hover */}
               <span className="absolute inset-y-3 left-0 w-px bg-brand opacity-0 transition-opacity group-hover:opacity-100" />
 
               <div className="flex items-center justify-between px-5 pt-4">
-                <span className="font-mono text-[10px] tracking-[0.25em] text-faint transition-colors group-hover:text-brand">
-                  R-{String(i + 1).padStart(3, '0')}
-                </span>
+                {project.language ? (
+                  <span className="eyebrow flex items-center gap-1.5 whitespace-nowrap text-dim">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: languageColor(project.language) }}
+                    />
+                    {project.language}
+                  </span>
+                ) : <span />}
                 <div className="flex items-center gap-3">
                   <a
                     href={project.html_url}
@@ -248,77 +324,61 @@ export default function Dashboard({
                 >
                   {project.name}
                 </Link>
-
-                {project.summary ? (
-                  <p className="mt-2 flex-grow text-sm leading-relaxed text-zinc-400">
-                    {project.summary}
-                  </p>
-                ) : (
-                  <p className="mt-2 flex-grow text-sm italic text-faint">
-                    {project.description || 'No description available.'}
-                  </p>
-                )}
+                <p className={`mt-2 flex-grow text-sm leading-relaxed ${project.description ? 'text-dim' : 'italic text-faint'}`}>
+                  {project.description || 'No description on GitHub.'}
+                </p>
               </div>
 
-              <footer className="mt-auto border-t border-line px-5 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-3">
-                    {project.language && (
-                      <span className="flex items-center gap-1.5 whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-zinc-400">
-                        <span
-                          className="h-2 w-2 rounded-full"
-                          style={{ backgroundColor: languageColor(project.language) }}
-                        />
-                        {project.language}
-                      </span>
-                    )}
-                    <div className="flex items-center gap-2">
-                      {(project.technologies || []).slice(0, 5).map(tech => {
-                        const iconClass = mapTechToDevicon(tech)
-                        return (
-                          <span key={tech} className="group/tooltip relative flex items-center">
-                            {iconClass ? (
-                              <i className={`${iconClass} text-base text-zinc-500 transition-colors group-hover/tooltip:text-foreground`} />
-                            ) : (
-                              <span
-                                className="font-mono text-[9px] tracking-wider"
-                                style={{ color: languageColor(tech) }}
-                              >
-                                {tech.substring(0, 2).toUpperCase()}
-                              </span>
-                            )}
-                            <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap border border-line bg-raised px-1.5 py-0.5 font-mono text-[10px] text-zinc-300 opacity-0 transition-opacity group-hover/tooltip:opacity-100">
-                              {tech}
-                            </span>
+              <footer className="mt-auto flex items-center justify-between gap-3 border-t border-line px-5 py-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  {stackTechnologies(project).slice(0, 5).map(tech => {
+                    const iconClass = deviconFor(tech)
+                    return (
+                      <span key={tech} tabIndex={0} role="img" aria-label={tech} className="group/tooltip relative flex items-center outline-none">
+                        {iconClass ? (
+                          <i aria-hidden="true" className={`${iconClass} text-base text-faint transition-colors group-hover/tooltip:text-foreground group-focus-visible/tooltip:text-foreground`} />
+                        ) : (
+                          <span
+                            aria-hidden="true"
+                            className="font-mono text-[9px] tracking-wider"
+                            style={{ color: languageColor(tech) }}
+                          >
+                            {tech.substring(0, 2).toUpperCase()}
                           </span>
-                        )
-                      })}
-                    </div>
-                  </div>
-                  <span className="whitespace-nowrap font-mono text-[10px] text-faint">
-                    {isoDate(project.pushed_at || project.updated_at)}
-                  </span>
+                        )}
+                        <span aria-hidden="true" className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap border border-line bg-raised px-1.5 py-0.5 font-mono text-[10px] text-dim opacity-0 transition-opacity group-hover/tooltip:opacity-100 group-focus-visible/tooltip:opacity-100">
+                          {tech}
+                        </span>
+                      </span>
+                    )
+                  })}
                 </div>
+                <span className="whitespace-nowrap font-mono text-[10px] text-faint">
+                  {isoDate(project.pushed_at || project.updated_at) ?? '----.--.--'}
+                </span>
               </footer>
             </article>
           ))}
 
           {filteredAndSorted.length === 0 && (
             <div className="corner-ticks relative col-span-full flex flex-col items-center justify-center border border-dashed border-line py-20 text-center">
-              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-brand">
-                ERR_NO_RECORDS
-              </span>
-              <h3 className="mt-3 text-lg font-semibold text-zinc-200">No projects found</h3>
+              <h3 className="text-lg font-semibold">No projects found</h3>
               <p className="mt-1 max-w-md text-sm text-faint">
-                Try syncing your GitHub account or adjusting your search filters to see your repositories.
+                {projects.length === 0
+                  ? 'Sync your GitHub account to import your repositories.'
+                  : 'No repositories match your search.'}
               </p>
-              <Button onClick={handleSync} variant="outline" className="mt-6 font-mono text-[11px] uppercase tracking-[0.15em]">
-                <RefreshCw className="h-3.5 w-3.5" /> Sync Now
-              </Button>
+              {projects.length === 0 && (
+                <Button onClick={handleSync} disabled={isSyncing} className="eyebrow mt-6">
+                  <RefreshCw className={isSyncing ? 'animate-spin' : ''} /> Sync GitHub
+                </Button>
+              )}
             </div>
           )}
         </section>
       </main>
+
+      <ChatWidget />
     </div>
   )
 }
