@@ -52,8 +52,19 @@ it('exposes completion state and named delete controls', async () => {
   expect(await screen.findByText('No tasks yet.')).toBeInTheDocument()
 })
 
-it('submits named task and milestone forms', async () => {
+it('does not offer legacy tasks or milestones to projects without existing records', () => {
   render(<ProjectDetailClient project={project} initialMilestones={[]} initialTodos={[]} />)
+  expect(screen.queryByRole('form', { name: 'Add task' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('form', { name: 'Add milestone' })).not.toBeInTheDocument()
+  expect(screen.queryByText(/Legacy tasks and milestones/)).not.toBeInTheDocument()
+  expect(screen.getByRole('form', { name: 'Edit project brief' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Ask about Example' })).toBeInTheDocument()
+})
+
+it('submits named task and milestone forms for projects with existing legacy records', async () => {
+  render(<ProjectDetailClient project={project} initialMilestones={[]}
+    initialTodos={[{ id: 't1', project_id: 'p1', task: 'Write docs', is_completed: false, created_at: '' }]} />)
+  expect(screen.getByText(/Legacy tasks and milestones/)).toBeInTheDocument()
   database.single.mockResolvedValueOnce({ data: { id: 't2', task: 'Test app', is_completed: false } })
   fireEvent.change(screen.getByRole('textbox', { name: 'New task' }), { target: { value: 'Test app' } })
   fireEvent.submit(screen.getByRole('form', { name: 'Add task' }))
