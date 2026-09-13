@@ -3,6 +3,7 @@ import { createRedis, redisKey, type UserContext } from './redis'
 
 export const API_LIMITS = {
   chat: { limit: 20, windowSeconds: 60 },
+  briefing: { limit: 5, windowSeconds: 300 },
   sync: { limit: 5, windowSeconds: 300 },
   'process-project': { limit: 10, windowSeconds: 300 },
 } as const

@@ -20,6 +20,17 @@ const DEPENDENCY_TECHNOLOGIES: Record<string, string> = {
   playwright: 'Playwright',
   '@playwright/test': 'Playwright',
   cypress: 'Cypress',
+  'react-router': 'React Router',
+  'react-router-dom': 'React Router',
+  redux: 'Redux',
+  'react-redux': 'Redux',
+  sass: 'Sass',
+  webpack: 'Webpack',
+  '@babel/core': 'Babel',
+  bootstrap: 'Bootstrap',
+  'react-bootstrap': 'React Bootstrap',
+  eslint: 'ESLint',
+  storybook: 'Storybook',
 }
 
 function technologyForDependency(dependency: string) {
@@ -29,6 +40,10 @@ function technologyForDependency(dependency: string) {
   if (name.startsWith('@nestjs/')) return 'NestJS'
   if (name.startsWith('@remix-run/')) return 'Remix'
   if (name.startsWith('@sveltejs/')) return name === '@sveltejs/kit' ? 'SvelteKit' : 'Svelte'
+  if (name.startsWith('@vitejs/')) return 'Vite'
+  if (name.startsWith('@mui/') || name.startsWith('@material-ui/')) return 'Material UI'
+  if (name.startsWith('@reduxjs/')) return 'Redux'
+  if (name.startsWith('@storybook/')) return 'Storybook'
   if (name.startsWith('@tanstack/')) return 'TanStack'
   if (name.startsWith('@supabase/')) return 'Supabase'
   if (name.startsWith('@cloudflare/')) return 'Cloudflare'
