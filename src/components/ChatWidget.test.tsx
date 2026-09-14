@@ -39,6 +39,21 @@ it('sends a message through the named form and announces the response', async ()
   }))
 })
 
+it('renders markdown in assistant responses but keeps user messages as text', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ content: '**Bold** answer\n\n- item one\n- item two' }),
+  }))
+  render(<ChatWidget />)
+  fireEvent.click(screen.getByRole('button', { name: 'Ask about your portfolio' }))
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Question **not bold**' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Send chat message' }))
+  const bold = await screen.findByText('Bold')
+  expect(bold.tagName).toBe('STRONG')
+  expect(screen.getAllByRole('listitem')).toHaveLength(2)
+  expect(screen.getByText('Question **not bold**')).toBeInTheDocument()
+})
+
 it('scopes questions to a project when mounted with one', async () => {
   const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ content: 'Project answer' }) })
   vi.stubGlobal('fetch', fetchMock)

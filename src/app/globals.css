@@ -195,6 +195,13 @@ body::before {
   border-right-width: 1px;
 }
 
+/* Code nested in a fenced block keeps the pre's own box styling. */
+.chat-md .chat-pre > code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

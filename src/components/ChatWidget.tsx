@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { MessageSquare, X, Send, Bot } from 'lucide-react'
+import ChatMarkdown from '@/components/ChatMarkdown'
 
 // When mounted with a projectId, questions are answered from that project's
 // evidence only; otherwise the whole portfolio is in scope.
@@ -110,7 +111,11 @@ export default function ChatWidget({ projectId, projectName }: { projectId?: str
                 <span className={`eyebrow mb-1 block ${msg.role === 'user' ? 'text-brand' : 'text-faint'}`}>
                   {msg.role === 'user' ? 'You' : 'Proofstack'}
                 </span>
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                {msg.role === 'user' ? (
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                ) : (
+                  <ChatMarkdown content={msg.content} />
+                )}
               </div>
             </div>
           ))}
