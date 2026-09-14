@@ -204,9 +204,14 @@ it('processing does not overwrite data when the provider fails', async () => {
   expect(update).not.toHaveBeenCalled()
 })
 it('sync preserves ownership on every upsert', async () => {
-  io.get.mockImplementation(async (key: string) => key.includes('github-repos')
-    ? [{ id: 42, name: 'project', full_name: 'owner/project', description: null, html_url: 'https://github.com/owner/project', language: null, homepage: null, stargazers_count: 0, pushed_at: null }]
-    : { found: true, dependencies: ['next'] })
+  io.get.mockImplementation(async (key: string) => {
+    if (key.includes('github-repos')) {
+      return [{ id: 42, name: 'project', full_name: 'owner/project', description: null, html_url: 'https://github.com/owner/project', language: null, homepage: null, stargazers_count: 0, pushed_at: null }]
+    }
+    if (key.includes('github-root-entries')) return { found: true, names: ['package.json'] }
+    if (key.includes('github-languages')) return { found: true, languages: [] }
+    return { found: true, dependencies: ['next'] }
+  })
   const upsert = vi.fn().mockResolvedValue({ error: null })
   io.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: async () => ({ data: { id: userId }, error: null }), upsert })
   const response = await sync(new Request('https://app.test/api/sync', { method: 'POST' }))

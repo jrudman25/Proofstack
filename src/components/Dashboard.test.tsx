@@ -59,6 +59,14 @@ it('uses bundled logos for detected frontend technologies', () => {
   expect(screen.getByRole('img', { name: 'Material UI' }).querySelector('i')).toHaveClass('devicon-materialui-plain')
 })
 
+it('shows bundled logos for non-JavaScript languages and manifest tools', () => {
+  render(<Dashboard initialProjects={[{ ...project, language: 'Java', technologies: ['Gradle', 'C++', 'C#'] }]} />)
+  expect(screen.getByRole('img', { name: 'Java' }).querySelector('i')).toHaveClass('devicon-java-plain')
+  expect(screen.getByRole('img', { name: 'Gradle' }).querySelector('i')).toHaveClass('devicon-gradle-original')
+  expect(screen.getByRole('img', { name: 'C++' }).querySelector('i')).toHaveClass('devicon-cplusplus-plain')
+  expect(screen.getByRole('img', { name: 'C#' }).querySelector('i')).toHaveClass('devicon-csharp-plain')
+})
+
 it('keeps the briefing as the only primary action and disables it without projects', () => {
   render(<Dashboard initialProjects={[]} />)
   expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeDisabled()

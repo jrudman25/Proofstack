@@ -28,10 +28,13 @@ function validRepositoryPath(owner: string, repo: string) {
   return typeof owner === 'string' && typeof repo === 'string' && /^[\w-]+$/.test(owner)
     && /^[\w.-]+$/.test(repo) && repo !== '.' && repo !== '..'
 }
-function validateDependencyNames(value: unknown) {
-  if (!Array.isArray(value) || value.length > 2000
-    || value.some(name => typeof name !== 'string' || name.length < 1 || name.length > 214)) unavailable()
+function validateNameList(value: unknown, maxCount: number, maxLength: number) {
+  if (!Array.isArray(value) || value.length > maxCount
+    || value.some(name => typeof name !== 'string' || name.length < 1 || name.length > maxLength)) unavailable()
   return value as string[]
+}
+function validateDependencyNames(value: unknown) {
+  return validateNameList(value, 2000, 214)
 }
 function parsePackageDependencies(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable()
@@ -132,6 +135,95 @@ export async function fetchGithubPackageDependencies(owner: string, repo: string
     const dependencies = parsePackageDependencies(JSON.parse(text))
     await redis.set(key, { found: true, dependencies }, { ex: 3600 })
     return dependencies
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    unavailable()
+  }
+}
+
+const MAX_LANGUAGES = 50
+const MAX_ROOT_ENTRIES = 1000
+
+function parseLanguages(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable()
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > MAX_LANGUAGES
+    || entries.some(([, bytes]) => !Number.isFinite(bytes) || (bytes as number) < 0)) unavailable()
+  // The API returns a language-to-byte-count map; order by size so dominant
+  // languages lead the stored list.
+  entries.sort((a, b) => (b[1] as number) - (a[1] as number))
+  return validateNameList(entries.map(([name]) => name), MAX_LANGUAGES, 100)
+}
+function parseLanguagesCache(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable()
+  const cached = value as Record<string, unknown>
+  if (cached.found === false && Array.isArray(cached.languages) && cached.languages.length === 0) return null
+  if (cached.found !== true) unavailable()
+  return validateNameList(cached.languages, MAX_LANGUAGES, 100)
+}
+export async function fetchGithubRepoLanguages(owner: string, repo: string, identity: GithubIdentity): Promise<string[] | null> {
+  try {
+    if (!validRepositoryPath(owner, repo) || !identity.accessToken?.trim()) unavailable()
+    const redis = createRedis()
+    const key = cacheKey(identity, 'github-languages', owner, repo)
+    const cached = await redis.get(key)
+    if (cached !== null) return parseLanguagesCache(cached)
+    const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/languages`, {
+      headers: headers(identity, 'application/vnd.github+json'), redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (res.status === 404) {
+      await redis.set(key, { found: false, languages: [] }, { ex: 3600 })
+      return null
+    }
+    if (!res.ok) unavailable()
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(await readBodyBytes(res, MAX_PACKAGE_BYTES))
+    const languages = parseLanguages(JSON.parse(text))
+    await redis.set(key, { found: true, languages }, { ex: 3600 })
+    return languages
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    unavailable()
+  }
+}
+
+function parseRootEntries(value: unknown) {
+  if (!Array.isArray(value) || value.length > MAX_ROOT_ENTRIES) unavailable()
+  return validateNameList(value.map((entry: unknown) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) unavailable()
+    return (entry as Record<string, unknown>).name
+  }), MAX_ROOT_ENTRIES, 255)
+}
+function parseRootEntriesCache(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable()
+  const cached = value as Record<string, unknown>
+  if (cached.found === false && Array.isArray(cached.names) && cached.names.length === 0) return null
+  if (cached.found !== true) unavailable()
+  return validateNameList(cached.names, MAX_ROOT_ENTRIES, 255)
+}
+// Returns the names of a repository's root directory entries (files and
+// directories). A null result means the repository is empty or no longer
+// accessible.
+export async function fetchGithubRootEntries(owner: string, repo: string, identity: GithubIdentity): Promise<string[] | null> {
+  try {
+    if (!validRepositoryPath(owner, repo) || !identity.accessToken?.trim()) unavailable()
+    const redis = createRedis()
+    const key = cacheKey(identity, 'github-root-entries', owner, repo)
+    const cached = await redis.get(key)
+    if (cached !== null) return parseRootEntriesCache(cached)
+    const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents`, {
+      headers: headers(identity, 'application/vnd.github+json'), redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (res.status === 404) {
+      await redis.set(key, { found: false, names: [] }, { ex: 3600 })
+      return null
+    }
+    if (!res.ok) unavailable()
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(await readBodyBytes(res, 2 * 1024 * 1024))
+    const names = parseRootEntries(JSON.parse(text))
+    await redis.set(key, { found: true, names }, { ex: 3600 })
+    return names
   } catch (error) {
     if (error instanceof ApiError) throw error
     unavailable()

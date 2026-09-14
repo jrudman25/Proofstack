@@ -24,6 +24,8 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
     const parsed = new URL(url)
     if (parsed.pathname.endsWith('/contents/package.json')) return new Response('', { status: 404 })
+    if (parsed.pathname.endsWith('/contents')) return new Response(JSON.stringify([]))
+    if (parsed.pathname.endsWith('/languages')) return new Response(JSON.stringify({}))
     const page = Number(parsed.searchParams.get('page'))
     return new Response(JSON.stringify(repos.slice((page - 1) * 100, page * 100)))
   }))
@@ -44,7 +46,7 @@ it('paginates and upserts bounded batches owned by the verified user', async () 
     expect(options).toEqual({ onConflict: 'user_id,github_repo_id' })
   }
 })
-it('merges detected package technologies with existing project metadata', async () => {
+it('merges package, manifest, and language technologies with existing metadata', async () => {
   const profileQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single }
   const projectQuery = {
     select: vi.fn().mockReturnThis(),
@@ -58,12 +60,31 @@ it('merges detected package technologies with existing project metadata', async 
       return new Response(JSON.stringify({ dependencies: { next: '15.5.24', react: '^19.0.0' } }))
     }
     if (parsed.pathname.endsWith('/contents/package.json')) return new Response('', { status: 404 })
+    if (parsed.pathname.endsWith('/repo-0/contents')) {
+      return new Response(JSON.stringify([
+        { name: 'package.json', type: 'file' },
+        { name: 'Dockerfile', type: 'file' },
+        { name: 'README.md', type: 'file' },
+      ]))
+    }
+    if (parsed.pathname.endsWith('/contents')) return new Response(JSON.stringify([]))
+    if (parsed.pathname.endsWith('/repo-0/languages')) {
+      return new Response(JSON.stringify({ TypeScript: 5000, CSS: 500 }))
+    }
+    if (parsed.pathname.endsWith('/languages')) return new Response(JSON.stringify({}))
     const page = Number(parsed.searchParams.get('page'))
-    return new Response(JSON.stringify(repos.slice((page - 1) * 100, page * 100)))
+    const slice = repos.slice((page - 1) * 100, page * 100)
+      .map(repo => repo.name === 'repo-0' ? { ...repo, language: 'TypeScript' } : repo)
+    return new Response(JSON.stringify(slice))
   })
   const response = await POST(request())
   expect(await response.json()).toMatchObject({ syncedCount: 205, packageJsonCount: 1 })
-  expect(io.upsert.mock.calls[0][0][0]).toMatchObject({ technologies: ['Custom Tool', 'Next.js', 'React'] })
+  // The primary language is carried by `language`, so it is not duplicated
+  // into technologies; secondary languages are appended.
+  expect(io.upsert.mock.calls[0][0][0]).toMatchObject({
+    language: 'TypeScript',
+    technologies: ['Custom Tool', 'Next.js', 'React', 'Docker', 'CSS'],
+  })
 })
 it('prefers the encrypted stored token without consulting the transient provider session', async () => {
   io.getToken.mockResolvedValue('stored-token')

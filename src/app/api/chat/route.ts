@@ -99,6 +99,7 @@ export async function POST(request: Request) {
       Never interpret absence from technologyIndex as proof that a project does not use a technology. If no indexed evidence matches, say that no match was found in the indexed metadata or retrieved README evidence.
       If catalogComplete is false, do not claim that no matching project exists outside the supplied catalog.
       Do not use general knowledge to invent facts about the user's projects. If the context cannot verify an answer, say so.
+      Format answers with markdown: short paragraphs, bullet lists, and bold project or technology names.
     `
 
     const formattedMessages = messages.map((m: { role: string; content: string }) => ({

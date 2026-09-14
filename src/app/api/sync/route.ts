@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import { authenticateUser, getProviderToken } from '@/lib/api-auth'
 import { apiErrorResponse, objectBody, readJsonBody } from '@/lib/api-validation'
 import { enforceRateLimit } from '@/lib/rate-limit'
-import { fetchGithubPackageDependencies, fetchGithubRepos, type GithubRepo } from '@/lib/github/api'
-import { mergeTechnologies, technologiesFromPackageDependencies } from '@/lib/package-technologies'
+import { fetchGithubPackageDependencies, fetchGithubRepoLanguages, fetchGithubRepos, fetchGithubRootEntries, type GithubRepo } from '@/lib/github/api'
+import { mergeTechnologies, normalizeTechnology, technologiesFromPackageDependencies } from '@/lib/package-technologies'
+import { technologiesFromManifestFiles } from '@/lib/manifest-technologies'
 
 const MANIFEST_BATCH_SIZE = 10
 
@@ -14,12 +15,27 @@ async function addManifestTechnologies(repos: GithubRepo[], existing: Map<number
   let packageJsonCount = 0
   for (let offset = 0; offset < repos.length; offset += MANIFEST_BATCH_SIZE) {
     const batch = await Promise.all(repos.slice(offset, offset + MANIFEST_BATCH_SIZE).map(async repo => {
+      const identity = { userId, accessToken }
       const [owner] = repo.full_name.split('/')
-      const dependencies = await fetchGithubPackageDependencies(owner, repo.name, { userId, accessToken })
+      const [files, languages] = await Promise.all([
+        fetchGithubRootEntries(owner, repo.name, identity),
+        fetchGithubRepoLanguages(owner, repo.name, identity),
+      ])
+      // The root listing tells us whether package.json exists, so non-JS
+      // repositories skip an extra request that would 404.
+      const dependencies = files?.includes('package.json')
+        ? await fetchGithubPackageDependencies(owner, repo.name, identity)
+        : null
       if (dependencies !== null) packageJsonCount++
+      const primary = repo.language && normalizeTechnology(repo.language)
       return {
         ...repo,
-        technologies: mergeTechnologies(existing.get(repo.id), dependencies && technologiesFromPackageDependencies(dependencies))
+        technologies: mergeTechnologies(
+          existing.get(repo.id),
+          dependencies && technologiesFromPackageDependencies(dependencies),
+          files && technologiesFromManifestFiles(files),
+          languages?.filter(language => normalizeTechnology(language) !== primary),
+        )
       }
     }))
     indexed.push(...batch)
