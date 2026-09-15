@@ -23,6 +23,6 @@ it('allows a verified user', async () => {
   const response = await updateSession(new NextRequest('https://app.test/projects'))
   expect(response.headers.get('location')).toBeNull()
 })
-it.each(['/login', '/auth/callback'])('allows public auth path %s', async path => {
+it.each(['/login', '/auth/callback', '/auth/auth-code-error', '/privacy'])('allows public path %s', async path => {
   expect((await updateSession(new NextRequest(`https://app.test${path}`))).headers.get('location')).toBeNull()
 })

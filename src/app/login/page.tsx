@@ -1,21 +1,32 @@
 'use client'
 
+import { useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { GithubIcon } from '@/components/icons/GithubIcon'
 import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
 
 export default function LoginPage() {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState('')
+
   const handleGithubLogin = async () => {
+    setPending(true)
+    setError('')
     const supabase = createClient()
-    await supabase.auth.signInWithOAuth({
+    // Read-only public-repository access by default; `repo` is only requested
+    // later if the owner chooses to include private repositories.
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: 'github',
       options: {
         redirectTo: `${location.origin}/auth/callback`,
-        // `repo` is required to read private repositories; webhooks are configured manually.
-        scopes: 'repo read:user user:email'
+        scopes: 'public_repo read:user user:email'
       },
     })
+    if (oauthError) {
+      setPending(false)
+      setError('Unable to start GitHub sign-in. Please try again.')
+    }
   }
 
   return (
@@ -37,17 +48,23 @@ export default function LoginPage() {
 
         <Button
           onClick={handleGithubLogin}
+          disabled={pending}
           size="lg"
           className="label mt-8 w-full"
         >
           <GithubIcon className="h-4 w-4" />
-          Sign in with GitHub
+          {pending ? 'Redirecting to GitHub' : 'Sign in with GitHub'}
         </Button>
+
+        {error && <p role="alert" className="mt-4 text-center font-mono text-[11px] text-dim">{error}</p>}
       </div>
 
-      <p className="eyebrow mt-8 text-center text-faint">
-        GitHub access: repo · read:user · user:email
+      <p className="eyebrow mt-8 text-center text-dim">
+        GitHub access: public_repo · read:user · user:email
       </p>
+      <a href="/privacy" className="eyebrow mt-3 text-faint transition-colors hover:text-dim">
+        Privacy and data use
+      </a>
     </div>
   )
 }
