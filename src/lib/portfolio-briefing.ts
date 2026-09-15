@@ -35,6 +35,30 @@ function texts(value: unknown, maxItems: number, maxLength: number) {
   return value.map(item => text(item, maxLength))
 }
 
+// Counts repositories added, removed, or pushed since the persisted briefing
+// was generated, by comparing its stored evidence snapshot against the
+// current catalog.
+export function briefingChangedCount(evidence: unknown, projects: { id: string; pushed_at: string | null }[]): number {
+  const snapshot = evidence && typeof evidence === 'object' && !Array.isArray(evidence)
+    ? (evidence as { projects?: unknown }).projects : undefined
+  if (!Array.isArray(snapshot)) return 0
+  const previous = new Map<string, string | null>()
+  for (const entry of snapshot) {
+    if (entry && typeof entry === 'object' && typeof (entry as { id?: unknown }).id === 'string') {
+      previous.set((entry as { id: string }).id, (entry as { pushed_at?: string | null }).pushed_at ?? null)
+    }
+  }
+  let changed = 0
+  const currentIds = new Set(projects.map(project => project.id))
+  for (const project of projects) {
+    if (!previous.has(project.id) || previous.get(project.id) !== project.pushed_at) changed++
+  }
+  for (const id of previous.keys()) {
+    if (!currentIds.has(id)) changed++
+  }
+  return changed
+}
+
 export function parseGeneratedBriefing(value: string, projects: CitationProject[]): PortfolioBriefing {
   const root = object(JSON.parse(value))
   const allowedIds = new Set(projects.map(project => project.id))
