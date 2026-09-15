@@ -1,6 +1,25 @@
 import { createClient } from '@/utils/supabase/server'
-import { redirect } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
+import Link from 'next/link'
 import ProjectDetailClient from '@/components/ProjectDetailClient'
+import { Logo } from '@/components/icons/Logo'
+
+const PROJECT_COLUMNS = 'id, user_id, github_repo_id, name, full_name, description, html_url, language, homepage, stargazers_count, pushed_at, github_created_at, is_private, ai_opt_in, summary, technologies, has_code_map, created_at, updated_at'
+
+function LoadError({ message }: { message: string }) {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center p-6 font-sans">
+      <div className="corner-ticks relative w-full max-w-md border border-line bg-surface p-8 text-center">
+        <h1 className="text-xl font-semibold tracking-tight">Unable to load this project</h1>
+        <p className="mt-3 text-sm leading-relaxed text-dim">{message} Your data is safe; try again in a moment.</p>
+        <Link href="/" className="eyebrow mt-6 inline-flex items-center gap-2 border border-line px-4 py-2 text-dim transition-colors hover:border-line-bright hover:text-foreground">
+          <Logo className="h-3.5 w-3.5 text-brand" />
+          Back to dashboard
+        </Link>
+      </div>
+    </div>
+  )
+}
 
 export default async function ProjectPage({
   params,
@@ -18,43 +37,40 @@ export default async function ProjectPage({
     redirect('/login')
   }
 
-  // Fetch project details
-  const { data: project } = await supabase
+  // Distinguish a failed read from a confirmed absence: dependency failures
+  // render a recoverable error rather than an empty or redirected page.
+  const { data: project, error: projectError } = await supabase
     .from('projects')
-    .select('*')
+    .select(PROJECT_COLUMNS)
     .eq('id', id)
-    .single()
-
-  if (!project || project.user_id !== user.id) {
-    redirect('/')
-  }
-
-  const { data: brief } = await supabase
-    .from('project_briefs')
-    .select('*')
-    .eq('project_id', id)
     .maybeSingle()
 
-  // Fetch milestones
-  const { data: milestones } = await supabase
-    .from('milestones')
-    .select('*')
-    .eq('project_id', id)
-    .order('created_at', { ascending: true })
+  if (projectError) {
+    console.error('Error fetching project')
+    return <LoadError message="The project record could not be read." />
+  }
 
-  // Fetch todos
-  const { data: todos } = await supabase
-    .from('todos')
-    .select('*')
-    .eq('project_id', id)
-    .order('created_at', { ascending: true })
+  if (!project || project.user_id !== user.id) {
+    notFound()
+  }
+
+  const [briefResult, milestoneResult, todoResult, embeddingResult] = await Promise.all([
+    supabase.from('project_briefs').select('*').eq('project_id', id).maybeSingle(),
+    supabase.from('milestones').select('*').eq('project_id', id).order('created_at', { ascending: true }),
+    supabase.from('todos').select('*').eq('project_id', id).order('created_at', { ascending: true }),
+    supabase.from('project_embeddings').select('metadata').eq('project_id', id).eq('source', 'readme').maybeSingle(),
+  ])
 
   return (
     <ProjectDetailClient
       project={project}
-      initialBrief={brief}
-      initialMilestones={milestones || []}
-      initialTodos={todos || []}
+      initialBrief={briefResult.data}
+      briefLoadFailed={Boolean(briefResult.error)}
+      readmeIndexedPushedAt={typeof embeddingResult.data?.metadata?.pushed_at === 'string' ? embeddingResult.data.metadata.pushed_at : null}
+      readmeIndexExists={Boolean(embeddingResult.data)}
+      initialMilestones={milestoneResult.error ? [] : milestoneResult.data || []}
+      initialTodos={todoResult.error ? [] : todoResult.data || []}
+      legacyLoadFailed={Boolean(milestoneResult.error || todoResult.error)}
     />
   )
 }

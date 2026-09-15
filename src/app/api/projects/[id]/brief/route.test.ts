@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { GET, PATCH } from './route'
 
-const io = vi.hoisted(() => ({ getUser: vi.fn(), from: vi.fn(), projectSingle: vi.fn(), briefSingle: vi.fn(), upsert: vi.fn(), eval: vi.fn() }))
+const io = vi.hoisted(() => ({ getUser: vi.fn(), from: vi.fn(), projectSingle: vi.fn(), briefSingle: vi.fn(), writeSingle: vi.fn(), update: vi.fn(), insert: vi.fn(), updateEq: vi.fn(), eval: vi.fn() }))
 vi.mock('next/headers', () => ({ cookies: async () => ({ getAll: () => [], set: vi.fn() }) }))
 vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth: { getUser: io.getUser }, from: io.from }) }))
 vi.mock('@upstash/redis', () => ({ Redis: class { eval = io.eval } }))
@@ -33,6 +33,7 @@ const body = {
   visibility: 'private',
   lifecycleStatus: 'active',
   ownerVerified: true,
+  baseUpdatedAt: '2026-09-12T00:00:00.000Z',
   purpose: ' Prepare developers for interviews ',
   inspiration: '',
   role_and_contributions: '',
@@ -57,9 +58,13 @@ beforeEach(() => {
   io.getUser.mockResolvedValue({ data: { user: { id: userId } }, error: null })
   io.projectSingle.mockResolvedValue({ data: project, error: null })
   io.briefSingle.mockResolvedValue({ data: brief, error: null })
+  io.writeSingle.mockResolvedValue({ data: brief, error: null })
+  // update().eq('project_id').eq('updated_at').select().maybeSingle()
+  io.updateEq.mockImplementation(() => ({ eq: io.updateEq, select: () => ({ maybeSingle: io.writeSingle }) }))
+  io.update.mockReturnValue({ eq: io.updateEq })
+  io.insert.mockReturnValue({ select: () => ({ maybeSingle: io.writeSingle }) })
   const projectQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: io.projectSingle }
-  const briefQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: io.briefSingle, upsert: io.upsert }
-  io.upsert.mockReturnValue(briefQuery)
+  const briefQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: io.briefSingle, update: io.update, insert: io.insert }
   io.from.mockImplementation((table: string) => table === 'projects' ? projectQuery : briefQuery)
 })
 afterEach(() => vi.unstubAllEnvs())
@@ -72,18 +77,44 @@ it('returns only the authenticated owner brief', async () => {
   expect(io.from).toHaveBeenNthCalledWith(2, 'project_briefs')
 })
 
-it('normalizes and upserts an owner-reviewed brief', async () => {
+it('normalizes and updates an owner-reviewed brief when the base version matches', async () => {
   const response = await PATCH(patch(), context)
   expect(response.status).toBe(200)
-  expect(io.upsert).toHaveBeenCalledWith(expect.objectContaining({
-    project_id: projectId,
+  expect(io.update).toHaveBeenCalledWith(expect.objectContaining({
     visibility: 'private',
     lifecycle_status: 'active',
     purpose: 'Prepare developers for interviews',
     inspiration: null,
     owner_verified_at: expect.any(String),
     last_reviewed_at: expect.any(String),
-  }), { onConflict: 'project_id' })
+  }))
+  expect(io.updateEq).toHaveBeenCalledWith('project_id', projectId)
+  expect(io.updateEq).toHaveBeenCalledWith('updated_at', '2026-09-12T00:00:00.000Z')
+})
+
+it('inserts the first brief when none exists and no base version was claimed', async () => {
+  io.briefSingle.mockResolvedValue({ data: null, error: null })
+  const response = await PATCH(patch({ ...body, baseUpdatedAt: null }), context)
+  expect(response.status).toBe(200)
+  expect(io.insert).toHaveBeenCalledWith(expect.objectContaining({ project_id: projectId, purpose: 'Prepare developers for interviews' }))
+  expect(io.update).not.toHaveBeenCalled()
+})
+
+it.each([
+  ['missing', { ...body, baseUpdatedAt: null }],
+  ['stale', { ...body, baseUpdatedAt: '2026-09-11T00:00:00.000Z' }],
+])('rejects a %s base version without overwriting the saved brief', async (_name, value) => {
+  const response = await PATCH(patch(value), context)
+  expect(response.status).toBe(409)
+  expect(await response.json()).toEqual({ error: 'This brief was updated elsewhere. Reload it before saving.' })
+  expect(io.update).not.toHaveBeenCalled()
+  expect(io.insert).not.toHaveBeenCalled()
+})
+
+it('treats a write that matches nothing as a conflict rather than a silent overwrite', async () => {
+  io.writeSingle.mockResolvedValue({ data: null, error: null })
+  const response = await PATCH(patch(), context)
+  expect(response.status).toBe(409)
 })
 
 it('rejects inaccessible projects before brief access', async () => {
@@ -91,7 +122,8 @@ it('rejects inaccessible projects before brief access', async () => {
   const response = await PATCH(patch(), context)
   expect(response.status).toBe(404)
   expect(io.from).toHaveBeenCalledTimes(1)
-  expect(io.upsert).not.toHaveBeenCalled()
+  expect(io.update).not.toHaveBeenCalled()
+  expect(io.insert).not.toHaveBeenCalled()
 })
 
 it.each([
@@ -99,8 +131,20 @@ it.each([
   { ...body, lifecycleStatus: 'unknown' },
   { ...body, purpose: 'x'.repeat(4001) },
   { ...body, ai_draft: { purpose: 'untrusted' } },
+  { ...body, baseUpdatedAt: 'not-a-date' },
 ])('rejects malformed or protected fields before database access', async value => {
   const response = await PATCH(patch(value), context)
+  expect(response.status).toBe(400)
+  expect(io.from).not.toHaveBeenCalled()
+})
+
+it('rejects a body exceeding the shared total-size limit', async () => {
+  const response = await PATCH(patch({
+    ...body,
+    purpose: 'x'.repeat(3500), inspiration: 'x'.repeat(3500), role_and_contributions: 'x'.repeat(3500),
+    architecture_and_decisions: 'x'.repeat(3500), challenges_and_solutions: 'x'.repeat(3500),
+    outcomes_and_impact: 'x'.repeat(3500),
+  }), context)
   expect(response.status).toBe(400)
   expect(io.from).not.toHaveBeenCalled()
 })
