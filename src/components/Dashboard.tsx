@@ -2,8 +2,8 @@
 
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Project } from '@/types'
-import { RefreshCw, Star, LogOut } from 'lucide-react'
+import { DashboardProject, StoredBriefing } from '@/types'
+import { RefreshCw, Star, LogOut, Lock, Settings } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/GithubIcon'
 import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
@@ -111,7 +111,7 @@ const DEVICON_BY_TECHNOLOGY: Record<string, string> = {
   zig: 'devicon-zig-original',
   nim: 'devicon-nim-plain',
   matlab: 'devicon-matlab-plain',
-  crystal: 'devicon-crystal-original',
+  crystal: 'devicon-crystal-plain',
   solidity: 'devicon-solidity-plain',
   markdown: 'devicon-markdown-original',
   json: 'devicon-json-plain',
@@ -190,7 +190,7 @@ const DEVICON_BY_TECHNOLOGY: Record<string, string> = {
 }
 const deviconFor = (tech: string) => DEVICON_BY_TECHNOLOGY[normalizeTechnology(tech)] ?? null
 
-const stackTechnologies = (project: Project) => {
+const stackTechnologies = (project: DashboardProject) => {
   const technologies = new Map<string, string>()
   for (const candidate of [project.language, ...(project.technologies || [])]) {
     const technology = candidate?.trim()
@@ -207,6 +207,10 @@ const SORTS = [
   { key: 'name', label: 'Alphabetical' },
 ] as const
 
+const LIFECYCLE_LABELS: Record<string, string> = {
+  prototype: 'Prototype', active: 'Active', maintained: 'Maintained', completed: 'Completed', archived: 'Archived',
+}
+
 type DashboardUser = {
   handle: string | null
   displayName: string | null
@@ -222,9 +226,17 @@ const isoDate = (value: string | null | undefined) => {
 export default function Dashboard({
   initialProjects,
   user,
+  lastSyncedAt = null,
+  privateReposConnected = true,
+  initialBriefing = null,
+  loadError = false,
 }: {
-  initialProjects: Project[]
+  initialProjects: DashboardProject[]
   user?: DashboardUser | null
+  lastSyncedAt?: string | null
+  privateReposConnected?: boolean
+  initialBriefing?: StoredBriefing | null
+  loadError?: boolean
 }) {
   const router = useRouter()
   // Read server-provided projects directly so router.refresh() actually
@@ -234,13 +246,7 @@ export default function Dashboard({
   const [sort, setSort] = useState<'updated' | 'stars' | 'name'>('updated')
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
-
-  // Sync stamps every upserted row with the current time, so the newest
-  // updated_at is the most recent completed sync.
-  const lastSyncedAt = useMemo(() => {
-    const times = projects.map(p => new Date(p.updated_at).getTime()).filter(Number.isFinite)
-    return times.length ? isoDate(new Date(Math.max(...times)).toISOString()) : null
-  }, [projects])
+  const [connectMessage, setConnectMessage] = useState('')
 
   const handleSync = async () => {
     setIsSyncing(true)
@@ -249,7 +255,12 @@ export default function Dashboard({
       const res = await fetch('/api/sync', { method: 'POST' })
       const data = await res.json()
       if (res.ok) {
-        setSyncMessage(`Synced ${data.syncedCount} projects.`)
+        const incomplete = data.enrichmentComplete === false
+          ? ' Manifest enrichment timed out; sync again to finish it.'
+          : data.enrichmentFailures > 0
+            ? ` ${data.enrichmentFailures} ${data.enrichmentFailures === 1 ? 'repository' : 'repositories'} synced without manifest evidence.`
+            : ''
+        setSyncMessage(`Synced ${data.syncedCount} projects.${incomplete}`)
         router.refresh()
       } else {
         setSyncMessage(clientErrorMessage(res, data, 'Unable to sync projects. Please try again.'))
@@ -259,6 +270,21 @@ export default function Dashboard({
     } finally {
       setIsSyncing(false)
     }
+  }
+
+  // Upgrades the GitHub grant from public_repo to repo so private
+  // repositories can be imported; the user returns to the dashboard.
+  const handleConnectPrivate = async () => {
+    setConnectMessage('')
+    const supabase = createClient()
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'github',
+      options: {
+        redirectTo: `${location.origin}/auth/callback?next=/`,
+        scopes: 'repo read:user user:email'
+      },
+    })
+    if (error) setConnectMessage('Unable to start GitHub authorization. Please try again.')
   }
 
   const handleSignOut = async () => {
@@ -313,10 +339,17 @@ export default function Dashboard({
                   {user.handle ? `@${user.handle}` : user.displayName}
                 </span>
               )}
+              <Link
+                href="/account"
+                aria-label="Account settings"
+                className="p-1 text-dim transition-colors hover:text-foreground"
+              >
+                <Settings className="h-4 w-4" />
+              </Link>
               <button
                 onClick={handleSignOut}
                 aria-label="Sign out"
-                className="text-faint transition-colors hover:text-foreground"
+                className="p-1 text-dim transition-colors hover:text-foreground"
               >
                 <LogOut className="h-4 w-4" />
               </button>
@@ -326,14 +359,14 @@ export default function Dashboard({
       </header>
 
       <main className="mx-auto max-w-7xl px-4 pb-24 sm:px-6">
-        <PortfolioBriefingPanel projectCount={projects.length} />
+        <PortfolioBriefingPanel projectCount={projects.length} initial={initialBriefing} />
 
         {/* Projects toolbar: heading and count, search, sort, sync */}
-        <section aria-labelledby="projects-heading" className="mt-10 border-b border-line pb-4">
+        <section id="projects" aria-labelledby="projects-heading" className="mt-10 scroll-mt-20 border-b border-line pb-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-baseline gap-3">
               <h2 id="projects-heading" className="label text-foreground">Projects</h2>
-              <span className="font-mono text-[11px] text-faint">
+              <span className="font-mono text-[11px] text-dim">
                 {filteredAndSorted.length === projects.length
                   ? projects.length
                   : `${filteredAndSorted.length} / ${projects.length}`}
@@ -362,7 +395,7 @@ export default function Dashboard({
                     aria-pressed={sort === key}
                     onClick={() => setSort(key)}
                     className={`eyebrow whitespace-nowrap px-3 py-2 transition-colors ${
-                      sort === key ? 'bg-raised text-brand' : 'text-faint hover:text-dim'
+                      sort === key ? 'bg-raised text-brand' : 'text-dim hover:text-foreground'
                     }`}
                   >
                     {label}
@@ -382,7 +415,7 @@ export default function Dashboard({
                   Sync GitHub
                 </Button>
                 {lastSyncedAt && (
-                  <span className="whitespace-nowrap font-mono text-[10px] text-faint">Synced {lastSyncedAt}</span>
+                  <span className="whitespace-nowrap font-mono text-[10px] text-dim">Synced {isoDate(lastSyncedAt)}</span>
                 )}
               </div>
             </div>
@@ -391,10 +424,35 @@ export default function Dashboard({
           {syncMessage && (
             <p role="status" className="mt-3 font-mono text-[11px] text-dim">{syncMessage}</p>
           )}
+
+          {!privateReposConnected && (
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="font-mono text-[11px] text-dim">
+                Private repositories are not imported. Grant read access to include them in your private workspace.
+              </p>
+              <div className="flex items-center gap-3">
+                {connectMessage && <span role="status" className="font-mono text-[11px] text-dim">{connectMessage}</span>}
+                <Button variant="outline" onClick={handleConnectPrivate} className="eyebrow shrink-0">
+                  <Lock className="h-3.5 w-3.5" /> Include private repositories
+                </Button>
+              </div>
+            </div>
+          )}
         </section>
 
+        {loadError && (
+          <div role="alert" className="mt-6 border border-line bg-surface px-6 py-5">
+            <p className="text-sm text-dim">
+              Your projects could not be loaded. Your data is safe; this is a read failure, not an empty portfolio.
+            </p>
+            <Button variant="outline" onClick={() => router.refresh()} className="eyebrow mt-4">
+              <RefreshCw /> Retry
+            </Button>
+          </div>
+        )}
+
         {/* Project cards */}
-        <section className="grid grid-cols-1 gap-4 pt-6 md:grid-cols-2 xl:grid-cols-3">
+        {!loadError && <section className="grid grid-cols-1 gap-4 pt-6 md:grid-cols-2 xl:grid-cols-3">
           {filteredAndSorted.map((project, i) => (
             <article
               key={project.id}
@@ -404,26 +462,33 @@ export default function Dashboard({
               <span className="absolute inset-y-3 left-0 w-px bg-brand opacity-0 transition-opacity group-hover:opacity-100" />
 
               <div className="flex items-center justify-between px-5 pt-4">
-                {project.language ? (
-                  <span className="eyebrow flex items-center gap-1.5 whitespace-nowrap text-dim">
-                    <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: languageColor(project.language) }}
-                    />
-                    {project.language}
-                  </span>
-                ) : <span />}
+                <div className="flex items-center gap-3">
+                  {project.language ? (
+                    <span className="eyebrow flex items-center gap-1.5 whitespace-nowrap text-dim">
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: languageColor(project.language) }}
+                      />
+                      {project.language}
+                    </span>
+                  ) : <span />}
+                  {project.is_private && (
+                    <span className="eyebrow flex items-center gap-1 text-dim">
+                      <Lock className="h-3 w-3" /> Private
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-3">
                   <a
                     href={project.html_url}
                     aria-label={`View ${project.name} on GitHub (opens in new tab)`}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-faint opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                    className="p-1 text-dim transition-colors hover:text-foreground"
                   >
                     <GithubIcon className="h-3.5 w-3.5" />
                   </a>
-                  <span className="flex items-center gap-1 font-mono text-[11px] text-faint">
+                  <span className="flex items-center gap-1 font-mono text-[11px] text-dim">
                     <Star className="h-3 w-3 text-amber-300/80" />
                     {project.stargazers_count}
                   </span>
@@ -437,36 +502,45 @@ export default function Dashboard({
                 >
                   {project.name}
                 </Link>
-                <p className={`mt-2 flex-grow text-sm leading-relaxed ${project.description ? 'text-dim' : 'italic text-faint'}`}>
+                <p className={`mt-2 text-sm leading-relaxed ${project.description ? 'text-dim' : 'italic text-faint'}`}>
                   {project.description || 'No description on GitHub.'}
                 </p>
+                {project.brief?.purpose && (
+                  <p className="mt-2 flex-grow text-sm leading-relaxed text-foreground/90">
+                    <span className="eyebrow mr-2 text-brand">Owner notes</span>
+                    {project.brief.purpose}
+                  </p>
+                )}
+                {!project.brief?.purpose && <span className="flex-grow" />}
+                {project.brief?.lifecycle_status && (
+                  <span className="eyebrow mt-3 inline-block self-start border border-line px-2 py-0.5 text-dim">
+                    {LIFECYCLE_LABELS[project.brief.lifecycle_status]}
+                  </span>
+                )}
               </div>
 
               <footer className="mt-auto flex items-center justify-between gap-3 border-t border-line px-5 py-3">
-                <div className="flex min-w-0 items-center gap-2">
+                {/* Technology metadata is a single labeled group: readable by
+                    screen readers without five icon-only focus stops. */}
+                <span aria-label={`Technologies: ${stackTechnologies(project).slice(0, 5).join(', ')}`} className="flex min-w-0 items-center gap-2">
                   {stackTechnologies(project).slice(0, 5).map(tech => {
                     const iconClass = deviconFor(tech)
-                    return (
-                      <span key={tech} tabIndex={0} role="img" aria-label={tech} className="group/tooltip relative flex items-center outline-none">
-                        {iconClass ? (
-                          <i aria-hidden="true" className={`${iconClass} text-base text-faint transition-colors group-hover/tooltip:text-foreground group-focus-visible/tooltip:text-foreground`} />
-                        ) : (
-                          <span
-                            aria-hidden="true"
-                            className="font-mono text-[9px] tracking-wider"
-                            style={{ color: languageColor(tech) }}
-                          >
-                            {tech.substring(0, 2).toUpperCase()}
-                          </span>
-                        )}
-                        <span aria-hidden="true" className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap border border-line bg-raised px-1.5 py-0.5 font-mono text-[10px] text-dim opacity-0 transition-opacity group-hover/tooltip:opacity-100 group-focus-visible/tooltip:opacity-100">
-                          {tech}
-                        </span>
+                    return iconClass ? (
+                      <i key={tech} aria-hidden="true" title={tech} className={`${iconClass} text-base text-faint`} />
+                    ) : (
+                      <span
+                        key={tech}
+                        aria-hidden="true"
+                        title={tech}
+                        className="font-mono text-[9px] tracking-wider"
+                        style={{ color: languageColor(tech) }}
+                      >
+                        {tech.substring(0, 2).toUpperCase()}
                       </span>
                     )
                   })}
-                </div>
-                <span className="whitespace-nowrap font-mono text-[10px] text-faint">
+                </span>
+                <span className="whitespace-nowrap font-mono text-[10px] text-dim">
                   {isoDate(project.pushed_at || project.updated_at) ?? '----.--.--'}
                 </span>
               </footer>
@@ -476,7 +550,7 @@ export default function Dashboard({
           {filteredAndSorted.length === 0 && (
             <div className="corner-ticks relative col-span-full flex flex-col items-center justify-center border border-dashed border-line py-20 text-center">
               <h3 className="text-lg font-semibold">No projects found</h3>
-              <p className="mt-1 max-w-md text-sm text-faint">
+              <p className="mt-1 max-w-md text-sm text-dim">
                 {projects.length === 0
                   ? 'Sync your GitHub account to import your repositories.'
                   : 'No repositories match your search.'}
@@ -488,7 +562,7 @@ export default function Dashboard({
               )}
             </div>
           )}
-        </section>
+        </section>}
       </main>
 
       <ChatWidget />

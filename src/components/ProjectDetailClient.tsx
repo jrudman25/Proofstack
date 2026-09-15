@@ -2,10 +2,12 @@
 
 import { useState } from 'react'
 import { Project, ProjectBrief, Todo, Milestone } from '@/types'
-import { Check, Plus, Trash2, ArrowLeft, Star } from 'lucide-react'
+import { Check, Plus, Trash2, ArrowLeft, Star, Lock, FileText } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/GithubIcon'
+import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
 import { languageColor } from '@/lib/language-colors'
+import { clientErrorMessage } from '@/lib/client-error-message'
 import Link from 'next/link'
 import ProjectBriefEditor from '@/components/ProjectBriefEditor'
 import ChatWidget from '@/components/ChatWidget'
@@ -16,20 +18,93 @@ import { createClient } from '@/utils/supabase/client'
 export default function ProjectDetailClient({
   project,
   initialBrief,
+  briefLoadFailed = false,
+  readmeIndexExists = false,
+  readmeIndexedPushedAt = null,
   initialMilestones,
-  initialTodos
+  initialTodos,
+  legacyLoadFailed = false,
 }: {
   project: Project,
   initialBrief?: ProjectBrief | null,
+  briefLoadFailed?: boolean,
+  readmeIndexExists?: boolean,
+  readmeIndexedPushedAt?: string | null,
   initialMilestones: Milestone[],
-  initialTodos: Todo[]
+  initialTodos: Todo[],
+  legacyLoadFailed?: boolean,
 }) {
   const supabase = createClient()
   const [todos, setTodos] = useState<Todo[]>(initialTodos)
   const [milestones, setMilestones] = useState<Milestone[]>(initialMilestones)
+  const [aiOptIn, setAiOptIn] = useState(project.ai_opt_in)
+  const [consentMessage, setConsentMessage] = useState('')
+  const [isConsentSaving, setIsConsentSaving] = useState(false)
+  const [indexStatus, setIndexStatus] = useState<'idle' | 'working' | 'done' | 'failed'>(readmeIndexExists ? 'done' : 'idle')
+  const [indexStale, setIndexStale] = useState(readmeIndexExists && readmeIndexedPushedAt !== project.pushed_at)
+  const [indexMessage, setIndexMessage] = useState('')
+  const [briefDirty, setBriefDirty] = useState(false)
 
   const [newTodo, setNewTodo] = useState('')
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('')
+
+  const aiEnabled = !project.is_private || aiOptIn
+
+  const confirmLeave = (event: React.MouseEvent) => {
+    if (briefDirty && !window.confirm('You have unsaved brief changes. Leave without saving?')) {
+      event.preventDefault()
+    }
+  }
+
+  const handleConsent = async (next: boolean) => {
+    setIsConsentSaving(true)
+    setConsentMessage('')
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aiOptIn: next }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setConsentMessage(clientErrorMessage(res, data, 'Unable to update AI consent. Please try again.'))
+        return
+      }
+      setAiOptIn(next)
+      setConsentMessage(next
+        ? 'AI processing enabled for this repository.'
+        : 'AI processing disabled. Embedded README evidence was removed.')
+    } catch {
+      setConsentMessage('Unable to update AI consent. Please try again.')
+    } finally {
+      setIsConsentSaving(false)
+    }
+  }
+
+  const handleIndex = async () => {
+    setIndexStatus('working')
+    setIndexMessage('')
+    try {
+      const res = await fetch(`/api/projects/${project.id}/index`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        setIndexStatus('failed')
+        setIndexMessage(clientErrorMessage(res, data, 'Unable to index the README. Please try again.'))
+        return
+      }
+      if (data.indexed) {
+        setIndexStatus('done')
+        setIndexStale(false)
+        setIndexMessage('README indexed for chat and briefings.')
+      } else {
+        setIndexStatus('failed')
+        setIndexMessage('No README found for this repository.')
+      }
+    } catch {
+      setIndexStatus('failed')
+      setIndexMessage('Unable to index the README. Please try again.')
+    }
+  }
 
   const handleAddTodo = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -93,11 +168,22 @@ export default function ProjectDetailClient({
 
   return (
     <div className="min-h-screen font-sans">
-      <div className="mx-auto max-w-5xl space-y-8 px-6 py-10">
+      <header className="border-b border-line bg-ink/90">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <Link href="/" onClick={confirmLeave} className="flex items-center gap-3" aria-label="Back to dashboard">
+            <Logo className="h-5 w-5 text-brand" />
+            <span className="label font-bold tracking-[0.3em]">Proofstack</span>
+          </Link>
+          <span className="truncate font-mono text-[11px] text-dim">{project.full_name}</span>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-5xl space-y-8 px-6 py-10">
 
         <Link
           href="/"
-          className="label inline-flex items-center gap-2 text-faint transition-colors hover:text-brand"
+          onClick={confirmLeave}
+          className="label inline-flex items-center gap-2 text-dim transition-colors hover:text-brand"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           Back to Dashboard
@@ -106,8 +192,14 @@ export default function ProjectDetailClient({
         <header className="corner-ticks relative border border-line bg-surface px-6 py-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="font-mono text-[11px] text-faint">{project.full_name}</p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight">{project.name}</h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-semibold tracking-tight">{project.name}</h1>
+                {project.is_private && (
+                  <span className="eyebrow flex items-center gap-1.5 border border-line px-2 py-1 text-dim">
+                    <Lock className="h-3 w-3" /> Private
+                  </span>
+                )}
+              </div>
               {project.description && (
                 <p className="mt-2 max-w-2xl text-sm leading-relaxed text-dim">{project.description}</p>
               )}
@@ -141,11 +233,71 @@ export default function ProjectDetailClient({
           </div>
         </header>
 
-        <ProjectBriefEditor projectId={project.id} initialBrief={initialBrief} />
+        {project.is_private && (
+          <section aria-labelledby="private-heading" className="border border-line bg-surface px-6 py-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 id="private-heading" className="label text-dim">Private repository</h2>
+                <p className="mt-1 max-w-2xl text-sm leading-relaxed text-dim">
+                  Enabling AI processing sends this repository&apos;s metadata and README to Gemini for briefings, chat, and indexing. Raw private evidence never appears outside your workspace.
+                </p>
+                {consentMessage && <p role="status" className="mt-2 font-mono text-[11px] text-dim">{consentMessage}</p>}
+              </div>
+              <Button
+                variant={aiOptIn ? 'outline' : 'default'}
+                disabled={isConsentSaving}
+                onClick={() => handleConsent(!aiOptIn)}
+                className="eyebrow shrink-0"
+              >
+                {aiOptIn ? 'Disable AI processing' : 'Enable AI processing'}
+              </Button>
+            </div>
+          </section>
+        )}
+
+        <section aria-labelledby="evidence-heading" className="border border-line bg-surface px-6 py-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 id="evidence-heading" className="label text-dim">README evidence</h2>
+              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-dim">
+                {indexStatus === 'done'
+                  ? indexStale
+                    ? 'The README is indexed, but the repository has changed since. Reindex to refresh the evidence.'
+                    : 'The README is indexed and available to chat and briefings.'
+                  : 'Index the README so chat and briefings can cite its contents.'}
+              </p>
+              {indexMessage && <p role="status" className="mt-2 font-mono text-[11px] text-dim">{indexMessage}</p>}
+            </div>
+            <Button
+              variant="outline"
+              disabled={indexStatus === 'working' || !aiEnabled}
+              onClick={handleIndex}
+              className="eyebrow shrink-0"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              {indexStatus === 'working' ? 'Indexing' : indexStatus === 'done' ? 'Reindex README' : 'Index README'}
+            </Button>
+          </div>
+        </section>
+
+        {briefLoadFailed ? (
+          <section aria-labelledby="brief-heading" className="corner-ticks relative border border-line bg-surface px-6 py-5">
+            <h2 id="brief-heading" className="text-xl font-semibold tracking-tight">Project brief</h2>
+            <p className="mt-2 text-sm leading-relaxed text-dim">
+              Your brief could not be read, so editing is disabled to protect your saved content. Reload the page to try again.
+            </p>
+          </section>
+        ) : (
+          <ProjectBriefEditor projectId={project.id} initialBrief={initialBrief} onDirtyChange={setBriefDirty} />
+        )}
+
+        {legacyLoadFailed && (
+          <p role="status" className="font-mono text-[11px] text-dim">Legacy task and milestone records could not be loaded.</p>
+        )}
 
         {hasLegacyRecords && (
           <details className="corner-ticks relative border border-line bg-surface">
-            <summary className="label cursor-pointer select-none px-6 py-4 text-faint transition-colors hover:text-foreground">
+            <summary className="label cursor-pointer select-none px-6 py-4 text-dim transition-colors hover:text-foreground">
               Legacy tasks and milestones
               <span className="ml-3 font-normal tracking-normal normal-case">
                 {openMilestones + openTodos} open. Task tracking is being retired; use the project brief instead.
@@ -228,7 +380,7 @@ export default function ProjectDetailClient({
                                 : 'border-line-bright hover:border-brand'
                             }`}
                           >
-                            {todo.is_completed && <Check className="h-3 w-3 text-brand" />}
+                            {todo.is_completed && <Check className="h-3.5 w-3.5 text-brand" />}
                           </button>
                           <span className={`text-sm ${todo.is_completed ? 'text-faint line-through' : 'text-foreground/90'}`}>
                             {todo.task}
@@ -268,9 +420,9 @@ export default function ProjectDetailClient({
             </div>
           </details>
         )}
-      </div>
+      </main>
 
-      <ChatWidget projectId={project.id} projectName={project.name} />
+      {aiEnabled && <ChatWidget projectId={project.id} projectName={project.name} />}
     </div>
   )
 }

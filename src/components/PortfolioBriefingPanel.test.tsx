@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import PortfolioBriefingPanel from './PortfolioBriefingPanel'
+import type { PortfolioBriefing } from '@/types'
 
-const briefing = {
+const briefing: PortfolioBriefing = {
   summary: 'A portfolio focused on web engineering.',
   themes: [{ title: 'Web engineering', detail: 'Uses typed application stacks.', projectIds: ['p1'] }],
   spotlights: [{ projectId: 'p1', reason: 'Shows system design.', talkingPoints: ['Explain the architecture.'] }],
@@ -14,14 +15,29 @@ const briefing = {
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-it('generates and presents a briefing with evidence links', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ briefing }) }))
+it('generates and presents a briefing with provenance labels and internal project links', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ briefing, generatedAt: '2026-09-14T00:00:00.000Z' }) }))
   render(<PortfolioBriefingPanel projectCount={1} />)
   fireEvent.click(screen.getByRole('button', { name: 'Prepare briefing' }))
   expect(await screen.findByText(briefing.summary)).toBeInTheDocument()
-  expect(screen.getAllByRole('link', { name: /Example/ })).toHaveLength(2)
-  expect(screen.getAllByRole('link', { name: /Example/ }).every(link => link.getAttribute('href') === 'https://github.com/owner/Example')).toBe(true)
+  // Spotlights and themes link into the internal project workspace; the
+  // GitHub link is auxiliary navigation, not evidence.
+  const internal = screen.getAllByRole('link', { name: 'Example' })
+  expect(internal).toHaveLength(2)
+  expect(internal.every(link => link.getAttribute('href') === '/project/p1')).toBe(true)
+  expect(screen.getAllByRole('link', { name: 'View Example on GitHub (opens in new tab)' })).toHaveLength(2)
+  expect(screen.getByText('GitHub metadata + Owner notes')).toBeInTheDocument()
+  expect(screen.getByText(/AI-generated 2026-09-14/)).toBeInTheDocument()
   expect(screen.getByText('Add measurable outcomes.')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Regenerate briefing' })).toBeInTheDocument()
+})
+
+it('shows a persisted briefing with its generated date and changed-repository count', () => {
+  render(<PortfolioBriefingPanel projectCount={2}
+    initial={{ briefing, generatedAt: '2026-09-10T00:00:00.000Z', changedCount: 1 }} />)
+  expect(screen.getByText(briefing.summary)).toBeInTheDocument()
+  expect(screen.getByText(/AI-generated 2026-09-10/)).toBeInTheDocument()
+  expect(screen.getByText(/1 repository changed since/)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Regenerate briefing' })).toBeInTheDocument()
 })
 

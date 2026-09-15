@@ -1,16 +1,18 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import Dashboard from './Dashboard'
-import type { Project } from '@/types'
+import type { DashboardProject } from '@/types'
 
 const refresh = vi.fn()
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
-const project: Project = {
-  id: 'p1', user_id: 'u1', github_repo_id: 1, name: 'Example', full_name: 'owner/Example',
+const project: DashboardProject = {
+  id: 'p1', name: 'Example', full_name: 'owner/Example',
   description: 'Example repository', html_url: 'https://github.com/owner/Example', language: 'TypeScript',
-  homepage: null, stargazers_count: 1, pushed_at: null, summary: 'A legacy summary', technologies: ['MongoDB', 'Next.js'],
-  has_code_map: false, created_at: '2026-01-01', updated_at: '2026-03-04T10:00:00.000Z',
+  homepage: null, stargazers_count: 1, pushed_at: null, technologies: ['MongoDB', 'Next.js'],
+  is_private: false, ai_opt_in: false, github_created_at: '2025-01-01T00:00:00.000Z',
+  created_at: '2026-01-01', updated_at: '2026-03-04T10:00:00.000Z',
+  brief: null,
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); refresh.mockClear() })
@@ -28,43 +30,56 @@ it('names search and GitHub links and exposes selected sorting', () => {
   expect(screen.getByText('No projects found')).toBeInTheDocument()
 })
 
-it('shows GitHub facts rather than legacy summaries and names technology icons', () => {
-  render(<Dashboard initialProjects={[project]} />)
+it('shows GitHub facts and names the technology icon group', () => {
+  const { container } = render(<Dashboard initialProjects={[project]} />)
   expect(screen.getByText('Example repository')).toBeInTheDocument()
-  expect(screen.queryByText('A legacy summary')).not.toBeInTheDocument()
-  expect(screen.getByText('Synced 2026-03-04')).toBeInTheDocument()
-  const mongo = screen.getByRole('img', { name: 'MongoDB' })
-  expect(mongo.querySelector('i')).toHaveClass('devicon-mongodb-plain')
-  expect(screen.getByRole('img', { name: 'Next.js' }).querySelector('i')).toHaveClass('devicon-nextjs-original')
-  mongo.focus()
-  expect(mongo).toHaveFocus()
+  expect(container.querySelector('i.devicon-mongodb-plain')).not.toBeNull()
+  expect(container.querySelector('i.devicon-nextjs-original')).not.toBeNull()
+  expect(container.querySelector('[aria-label="Technologies: TypeScript, MongoDB, Next.js"]')).not.toBeNull()
 })
 
-it('shows the primary language as both labeled metadata and a stack icon when no technologies were generated', () => {
-  render(<Dashboard initialProjects={[{ ...project, technologies: [] }]} />)
-  expect(screen.getAllByText('TypeScript')).toHaveLength(2)
-  expect(screen.getByRole('img', { name: 'TypeScript' }).querySelector('i')).toHaveClass('devicon-typescript-plain')
+it('shows the primary language as labeled metadata and a stack icon when no technologies were generated', () => {
+  const { container } = render(<Dashboard initialProjects={[{ ...project, technologies: [] }]} />)
+  expect(screen.getByText('TypeScript')).toBeInTheDocument()
+  expect(container.querySelector('i.devicon-typescript-plain')).not.toBeNull()
 })
 
 it('does not duplicate the primary language in the stack icons', () => {
-  render(<Dashboard initialProjects={[{ ...project, technologies: ['typescript', 'React'] }]} />)
-  expect(screen.getAllByRole('img', { name: /typescript/i })).toHaveLength(1)
-  expect(screen.getByRole('img', { name: 'TypeScript' })).toBeInTheDocument()
-  expect(screen.getByRole('img', { name: 'React' })).toBeInTheDocument()
+  const { container } = render(<Dashboard initialProjects={[{ ...project, technologies: ['typescript', 'React'] }]} />)
+  expect(container.querySelectorAll('i.devicon-typescript-plain')).toHaveLength(1)
+  expect(container.querySelector('i.devicon-react-original')).not.toBeNull()
 })
 
 it('uses bundled logos for detected frontend technologies', () => {
-  render(<Dashboard initialProjects={[{ ...project, technologies: ['Vite', 'Material UI'] }]} />)
-  expect(screen.getByRole('img', { name: 'Vite' }).querySelector('i')).toHaveClass('devicon-vitejs-plain')
-  expect(screen.getByRole('img', { name: 'Material UI' }).querySelector('i')).toHaveClass('devicon-materialui-plain')
+  const { container } = render(<Dashboard initialProjects={[{ ...project, technologies: ['Vite', 'Material UI'] }]} />)
+  expect(container.querySelector('i.devicon-vitejs-plain')).not.toBeNull()
+  expect(container.querySelector('i.devicon-materialui-plain')).not.toBeNull()
 })
 
 it('shows bundled logos for non-JavaScript languages and manifest tools', () => {
-  render(<Dashboard initialProjects={[{ ...project, language: 'Java', technologies: ['Gradle', 'C++', 'C#'] }]} />)
-  expect(screen.getByRole('img', { name: 'Java' }).querySelector('i')).toHaveClass('devicon-java-plain')
-  expect(screen.getByRole('img', { name: 'Gradle' }).querySelector('i')).toHaveClass('devicon-gradle-original')
-  expect(screen.getByRole('img', { name: 'C++' }).querySelector('i')).toHaveClass('devicon-cplusplus-plain')
-  expect(screen.getByRole('img', { name: 'C#' }).querySelector('i')).toHaveClass('devicon-csharp-plain')
+  const { container } = render(<Dashboard initialProjects={[{ ...project, language: 'Java', technologies: ['Gradle', 'C++', 'C#'] }]} />)
+  expect(container.querySelector('i.devicon-java-plain')).not.toBeNull()
+  expect(container.querySelector('i.devicon-gradle-original')).not.toBeNull()
+  expect(container.querySelector('i.devicon-cplusplus-plain')).not.toBeNull()
+  expect(container.querySelector('i.devicon-csharp-plain')).not.toBeNull()
+})
+
+it('marks private repositories and shows owner brief context on cards', () => {
+  render(<Dashboard initialProjects={[{
+    ...project, is_private: true,
+    brief: { purpose: 'Interview prep notes', lifecycle_status: 'active', owner_verified_at: null },
+  }]} />)
+  expect(screen.getByText('Private')).toBeInTheDocument()
+  expect(screen.getByText('Owner notes')).toBeInTheDocument()
+  expect(screen.getByText('Interview prep notes')).toBeInTheDocument()
+  expect(screen.getByText('Active')).toBeInTheDocument()
+})
+
+it('shows the last completed catalog sync and the private-repository connection prompt', () => {
+  render(<Dashboard initialProjects={[project]} lastSyncedAt="2026-03-04T10:00:00.000Z" privateReposConnected={false} />)
+  expect(screen.getByText('Synced 2026-03-04')).toBeInTheDocument()
+  expect(screen.getByText(/Private repositories are not imported/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /Include private repositories/ })).toBeInTheDocument()
 })
 
 it('keeps the briefing as the only primary action and disables it without projects', () => {
@@ -79,7 +94,7 @@ it('reflects refreshed server projects and briefing eligibility without losing s
   expect(screen.getByText(/Sync your GitHub account/)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeDisabled()
   fireEvent.change(screen.getByRole('textbox', { name: 'Search projects and technologies' }), { target: { value: 'Example' } })
-  rerender(<Dashboard initialProjects={[project]} />)
+  rerender(<Dashboard initialProjects={[project]} lastSyncedAt="2026-03-04T10:00:00.000Z" />)
   expect(screen.getByRole('link', { name: 'Example' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeEnabled()
   expect(screen.getByText('Synced 2026-03-04')).toBeInTheDocument()
@@ -92,6 +107,13 @@ it('refreshes server data after a successful sync and reports the count', async 
   fireEvent.click(screen.getByRole('button', { name: 'Sync GitHub' }))
   expect(await screen.findByRole('status')).toHaveTextContent('Synced 3 projects.')
   expect(refresh).toHaveBeenCalledOnce()
+})
+
+it('reports partial enrichment results from a successful sync', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ syncedCount: 3, enrichmentFailures: 2 }) }))
+  render(<Dashboard initialProjects={[project]} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Sync GitHub' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('Synced 3 projects. 2 repositories synced without manifest evidence.')
 })
 
 it('shows sanitized client-side sync errors from the API', async () => {

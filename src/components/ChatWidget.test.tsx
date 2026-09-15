@@ -70,6 +70,34 @@ it('scopes questions to a project when mounted with one', async () => {
   })
 })
 
+it('keeps a failed question for retry instead of sending it as history', async () => {
+  const fetchMock = vi.fn()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ content: 'Recovered' }) })
+  vi.stubGlobal('fetch', fetchMock)
+  render(<ChatWidget />)
+  fireEvent.click(screen.getByRole('button', { name: 'Ask about your portfolio' }))
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'First question' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Send chat message' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Unable to send your message')
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(await screen.findByText('Recovered')).toBeInTheDocument()
+  // The retried request resends the same question, not a duplicated history.
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body).messages).toEqual([{ role: 'user', content: 'First question' }])
+})
+
+it('clears the conversation on demand', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ content: 'Answer' }) }))
+  render(<ChatWidget />)
+  fireEvent.click(screen.getByRole('button', { name: 'Ask about your portfolio' }))
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Question' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Send chat message' }))
+  expect(await screen.findByText('Answer')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Start a new conversation' }))
+  expect(screen.queryByText('Answer')).not.toBeInTheDocument()
+  expect(screen.getByText(/synced repository metadata and README evidence/)).toBeInTheDocument()
+})
+
 it.each(['response', 'network'])('does not expose raw %s errors', async failure => {
   vi.stubGlobal('fetch', failure === 'network'
     ? vi.fn().mockRejectedValue(new Error('secret internal details'))

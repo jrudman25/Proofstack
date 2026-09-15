@@ -26,7 +26,17 @@ const savedBrief: ProjectBrief = {
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-it('saves owner context and marks reviewed content', async () => {
+it('opens a saved brief in read mode and enters editing explicitly', () => {
+  render(<ProjectBriefEditor projectId={projectId} initialBrief={savedBrief} />)
+  expect(screen.queryByRole('form', { name: 'Edit project brief' })).not.toBeInTheDocument()
+  expect(screen.getByText('Prepare developers for interviews')).toBeInTheDocument()
+  expect(screen.getByText('Active development')).toBeInTheDocument()
+  expect(screen.getByText('Reviewed 2026-09-12')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Edit brief' }))
+  expect(screen.getByRole('form', { name: 'Edit project brief' })).toBeInTheDocument()
+})
+
+it('saves owner context, sends the base version, and marks reviewed content', async () => {
   const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ brief: savedBrief }) })
   vi.stubGlobal('fetch', fetch)
   render(<ProjectBriefEditor projectId={projectId} />)
@@ -45,10 +55,36 @@ it('saves owner context and marks reviewed content', async () => {
     visibility: 'public',
     lifecycleStatus: 'active',
     ownerVerified: true,
+    baseUpdatedAt: null,
     purpose: 'Prepare developers for interviews',
   }))
   expect(await screen.findByRole('status')).toHaveTextContent('Project brief saved.')
   expect(screen.getByText('Reviewed 2026-09-12')).toBeInTheDocument()
+})
+
+it('sends the loaded updated_at as the base version for an existing brief', async () => {
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ brief: { ...savedBrief, updated_at: '2026-09-13T00:00:00.000Z' } }) })
+  vi.stubGlobal('fetch', fetch)
+  render(<ProjectBriefEditor projectId={projectId} initialBrief={savedBrief} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Edit brief' }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Purpose' }), { target: { value: 'Updated purpose' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Edit project brief' }))
+  await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+  expect(JSON.parse(fetch.mock.calls[0][1].body).baseUpdatedAt).toBe('2026-09-12T00:00:00.000Z')
+})
+
+it('offers to reload the latest version after a conflict', async () => {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: 'stale' }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ brief: savedBrief }) }))
+  render(<ProjectBriefEditor projectId={projectId} initialBrief={savedBrief} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Edit brief' }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Purpose' }), { target: { value: 'Stale edit' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Edit project brief' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('updated elsewhere')
+  fireEvent.click(screen.getByRole('button', { name: 'Reload latest' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('Latest version loaded.')
+  expect(screen.getByRole('textbox', { name: 'Purpose' })).toHaveValue('Prepare developers for interviews')
 })
 
 it.each(['response', 'network'])('does not expose project brief %s failures', async failure => {
@@ -56,6 +92,7 @@ it.each(['response', 'network'])('does not expose project brief %s failures', as
     ? vi.fn().mockRejectedValue(new Error('private details'))
     : vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: 'private details' }) }))
   render(<ProjectBriefEditor projectId={projectId} />)
+  fireEvent.change(screen.getByRole('textbox', { name: 'Purpose' }), { target: { value: 'Something' } })
   fireEvent.submit(screen.getByRole('form', { name: 'Edit project brief' }))
   expect(await screen.findByRole('status')).toHaveTextContent('Unable to save the project brief. Please try again.')
   expect(screen.queryByText(/private details/)).not.toBeInTheDocument()

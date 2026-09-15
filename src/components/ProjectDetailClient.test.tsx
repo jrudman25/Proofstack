@@ -16,6 +16,7 @@ const project: Project = {
   id: 'p1', user_id: 'u1', github_repo_id: 1, name: 'Example', full_name: 'owner/Example',
   description: null, html_url: 'https://github.com/owner/Example', language: null,
   homepage: null, stargazers_count: 0, pushed_at: null, summary: null, technologies: [],
+  is_private: false, ai_opt_in: false, github_created_at: null,
   has_code_map: false, created_at: '2026-01-01', updated_at: '2026-01-01',
 }
 
@@ -27,7 +28,7 @@ beforeEach(() => {
   database.delete.mockReturnValue({ eq: database.eq })
   database.insert.mockReturnValue({ select: () => ({ single: database.single }) })
 })
-afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.clearAllMocks() })
+afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 it('exposes completion state and named delete controls', async () => {
   render(<ProjectDetailClient project={project}
@@ -59,6 +60,37 @@ it('does not offer legacy tasks or milestones to projects without existing recor
   expect(screen.queryByText(/Legacy tasks and milestones/)).not.toBeInTheDocument()
   expect(screen.getByRole('form', { name: 'Edit project brief' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Ask about Example' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Index README' })).toBeInTheDocument()
+})
+
+it('indexes the README through the project endpoint and reports the result', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ indexed: true }) }))
+  render(<ProjectDetailClient project={project} initialMilestones={[]} initialTodos={[]} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Index README' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('README indexed for chat and briefings.')
+  expect(fetch).toHaveBeenCalledWith('/api/projects/p1/index', { method: 'POST' })
+})
+
+it('gates AI processing behind explicit consent on private repositories', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ aiOptIn: true }) }))
+  const privateProject = { ...project, is_private: true }
+  render(<ProjectDetailClient project={privateProject} initialMilestones={[]} initialTodos={[]} />)
+  expect(screen.getByText('Private repository')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Index README' })).toBeDisabled()
+  expect(screen.queryByRole('button', { name: 'Ask about Example' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Enable AI processing' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('AI processing enabled for this repository.')
+  expect(fetch).toHaveBeenCalledWith('/api/projects/p1', expect.objectContaining({
+    method: 'PATCH', body: JSON.stringify({ aiOptIn: true }),
+  }))
+  expect(screen.getByRole('button', { name: 'Index README' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: 'Ask about Example' })).toBeInTheDocument()
+})
+
+it('disables brief editing when the saved brief could not be loaded', () => {
+  render(<ProjectDetailClient project={project} briefLoadFailed initialMilestones={[]} initialTodos={[]} />)
+  expect(screen.queryByRole('form', { name: 'Edit project brief' })).not.toBeInTheDocument()
+  expect(screen.getByText(/editing is disabled to protect your saved content/)).toBeInTheDocument()
 })
 
 it('submits named task and milestone forms for projects with existing legacy records', async () => {
