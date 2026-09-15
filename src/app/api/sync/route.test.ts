@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { POST } from './route'
 
-const io = vi.hoisted(() => ({ getUser: vi.fn(), getSession: vi.fn(), from: vi.fn(), eval: vi.fn(), get: vi.fn(), set: vi.fn(), upsert: vi.fn(), single: vi.fn(), storeToken: vi.fn(), getToken: vi.fn() }))
+const io = vi.hoisted(() => ({ getUser: vi.fn(), getSession: vi.fn(), from: vi.fn(), eval: vi.fn(), get: vi.fn(), set: vi.fn(), upsert: vi.fn(), update: vi.fn(), single: vi.fn(), storeToken: vi.fn(), getToken: vi.fn() }))
 vi.mock('next/headers', () => ({ cookies: async () => ({ getAll: () => [], set: vi.fn() }) }))
 vi.mock('@/lib/github-token-store', () => ({ storeGithubToken: io.storeToken, getStoredGithubToken: io.getToken }))
 vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth: { getUser: io.getUser, getSession: io.getSession }, from: io.from }) }))
 vi.mock('@upstash/redis', () => ({ Redis: class { eval = io.eval; get = io.get; set = io.set } }))
 const userId = 'user-a'
 const repos = Array.from({ length: 205 }, (_, i) => ({ id: i + 1, name: `repo-${i}`, full_name: `owner/repo-${i}`, description: null,
-  html_url: `https://github.com/owner/repo-${i}`, language: null, homepage: null, stargazers_count: 0, pushed_at: null }))
+  html_url: `https://github.com/owner/repo-${i}`, language: null, homepage: null, stargazers_count: 0, pushed_at: null,
+  private: false, created_at: '2025-01-01T00:00:00Z' }))
 const request = () => new Request('https://app.test/api/sync', { method: 'POST' })
 beforeEach(() => {
   vi.resetAllMocks()
@@ -20,9 +21,11 @@ beforeEach(() => {
   io.get.mockResolvedValue(null)
   io.single.mockResolvedValue({ data: { id: userId }, error: null })
   io.upsert.mockResolvedValue({ error: null })
-  io.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, upsert: io.upsert })
+  io.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, upsert: io.upsert, update: io.update })
+  io.update.mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) })
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
     const parsed = new URL(url)
+    if (parsed.pathname === '/user') return new Response('{}', { headers: { 'x-oauth-scopes': 'public_repo, read:user' } })
     if (parsed.pathname.endsWith('/contents/package.json')) return new Response('', { status: 404 })
     if (parsed.pathname.endsWith('/contents')) return new Response(JSON.stringify([]))
     if (parsed.pathname.endsWith('/languages')) return new Response(JSON.stringify({}))
@@ -47,7 +50,7 @@ it('paginates and upserts bounded batches owned by the verified user', async () 
   }
 })
 it('merges package, manifest, and language technologies with existing metadata', async () => {
-  const profileQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single }
+  const profileQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, update: io.update }
   const projectQuery = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockResolvedValue({ data: [{ github_repo_id: 1, technologies: ['Custom Tool'] }], error: null }),
@@ -110,11 +113,19 @@ it('checks profile database errors before writes', async () => {
   expect(io.upsert).not.toHaveBeenCalled()
 })
 it('does not persist any page when a later GitHub page is malformed', async () => {
-  vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify(repos.slice(0, 100))))
-    .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 'invalid' }])))
+  vi.mocked(fetch).mockImplementation(async url => {
+    const parsed = new URL(String(url))
+    if (parsed.pathname === '/user') return new Response('{}')
+    if (parsed.pathname === '/user/repos') {
+      const page = Number(parsed.searchParams.get('page'))
+      return new Response(JSON.stringify(page === 2 ? [{ id: 'invalid' }] : repos.slice((page - 1) * 100, page * 100)))
+    }
+    return new Response('', { status: 404 })
+  })
   const response = await POST(request())
   expect(response.status).toBe(503)
   expect(await response.json()).toMatchObject({ syncedCount: 0 })
   expect(io.upsert).not.toHaveBeenCalled()
-  expect(io.set).not.toHaveBeenCalled()
+  // The scope probe may cache its result; the repo catalog must not be.
+  expect(io.set.mock.calls.every(([key]) => !String(key).includes('github-repos'))).toBe(true)
 })

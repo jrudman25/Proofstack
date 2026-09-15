@@ -6,7 +6,8 @@ const io = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(), cache: new Map<string
 vi.mock('@upstash/redis', () => ({ Redis: class { get = io.get; set = io.set } }))
 const identity = { userId: 'user-a', accessToken: 'same-prefix-token-a' }
 const repo = (id: number) => ({ id, name: `repo-${id}`, full_name: `owner/repo-${id}`, description: null,
-  html_url: `https://github.com/owner/repo-${id}`, language: 'TypeScript', homepage: '', stargazers_count: 0, pushed_at: null })
+  html_url: `https://github.com/owner/repo-${id}`, language: 'TypeScript', homepage: '', stargazers_count: 0, pushed_at: null,
+  private: false, created_at: '2025-01-01T00:00:00Z' })
 const page = (start: number, size: number) => Array.from({ length: size }, (_, n) => repo(start + n))
 const response = (data: unknown) => new Response(JSON.stringify(data), { headers: { Link: '<https://evil.test/private>; rel="next"' } })
 
@@ -88,6 +89,15 @@ describe('GitHub helpers', () => {
     vi.mocked(fetch).mockResolvedValue(response([]))
     io.set.mockRejectedValue(new Error('secret-redis-write'))
     await expect(fetchGithubRepos(identity)).rejects.toThrow(/^GitHub service temporarily unavailable$/)
+  })
+  it('retains private visibility and GitHub creation dates through the cache round-trip', async () => {
+    const privateRepo = { ...repo(7), private: true, created_at: '2024-06-01T00:00:00Z' }
+    vi.mocked(fetch).mockResolvedValue(response([privateRepo]))
+    const fresh = await fetchGithubRepos(identity)
+    expect(fresh).toEqual([expect.objectContaining({ id: 7, is_private: true, github_created_at: '2024-06-01T00:00:00Z' })])
+    const cached = await fetchGithubRepos(identity)
+    expect(cached).toEqual(fresh)
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
   it('deduplicates repositories repeated across pages before persistence', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(response(page(1, 100))).mockResolvedValueOnce(response([repo(100)]))

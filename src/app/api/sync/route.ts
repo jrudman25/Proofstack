@@ -2,45 +2,76 @@ import { NextResponse } from 'next/server'
 import { authenticateUser, getProviderToken } from '@/lib/api-auth'
 import { apiErrorResponse, objectBody, readJsonBody } from '@/lib/api-validation'
 import { enforceRateLimit } from '@/lib/rate-limit'
-import { fetchGithubPackageDependencies, fetchGithubRepoLanguages, fetchGithubRepos, fetchGithubRootEntries, type GithubRepo } from '@/lib/github/api'
+import { fetchGithubPackageDependencies, fetchGithubRepoLanguages, fetchGithubRepos, fetchGithubRootEntries, fetchGithubTokenScopes, type GithubRepo } from '@/lib/github/api'
 import { mergeTechnologies, normalizeTechnology, technologiesFromPackageDependencies } from '@/lib/package-technologies'
 import { technologiesFromManifestFiles } from '@/lib/manifest-technologies'
 
 const MANIFEST_BATCH_SIZE = 10
+// The repository-list traversal has its own 60-second budget inside
+// fetchGithubRepos; enrichment gets a separate bound so a slow provider or a
+// large cold-cache portfolio cannot stall the whole import.
+const ENRICHMENT_BUDGET_MS = 45_000
 
 type ExistingProject = { github_repo_id: number; technologies: string[] | null }
+type IndexedRepo = GithubRepo & { technologies: string[] }
+
+async function enrichRepository(repo: GithubRepo, existing: Map<number, string[]>, userId: string, accessToken: string) {
+  const identity = { userId, accessToken }
+  const [owner] = repo.full_name.split('/')
+  const [files, languages] = await Promise.all([
+    fetchGithubRootEntries(owner, repo.name, identity),
+    fetchGithubRepoLanguages(owner, repo.name, identity),
+  ])
+  // The root listing tells us whether package.json exists, so non-JS
+  // repositories skip an extra request that would 404.
+  const dependencies = files?.includes('package.json')
+    ? await fetchGithubPackageDependencies(owner, repo.name, identity)
+    : null
+  const primary = repo.language && normalizeTechnology(repo.language)
+  return {
+    repo: {
+      ...repo,
+      technologies: mergeTechnologies(
+        existing.get(repo.id),
+        dependencies && technologiesFromPackageDependencies(dependencies),
+        files && technologiesFromManifestFiles(files),
+        languages?.filter(language => normalizeTechnology(language) !== primary),
+      )
+    } as IndexedRepo,
+    packageJson: dependencies !== null,
+  }
+}
 
 async function addManifestTechnologies(repos: GithubRepo[], existing: Map<number, string[]>, userId: string, accessToken: string) {
-  const indexed: (GithubRepo & { technologies: string[] })[] = []
+  const indexed: IndexedRepo[] = []
   let packageJsonCount = 0
+  let enrichmentFailures = 0
+  let enrichmentComplete = true
+  const deadline = Date.now() + ENRICHMENT_BUDGET_MS
   for (let offset = 0; offset < repos.length; offset += MANIFEST_BATCH_SIZE) {
+    // Past the budget, remaining repositories sync without fresh manifest or
+    // language evidence rather than stalling or aborting the import.
+    if (Date.now() > deadline) {
+      enrichmentComplete = false
+      indexed.push(...repos.slice(offset).map(repo => ({ ...repo, technologies: existing.get(repo.id) || [] })))
+      break
+    }
     const batch = await Promise.all(repos.slice(offset, offset + MANIFEST_BATCH_SIZE).map(async repo => {
-      const identity = { userId, accessToken }
-      const [owner] = repo.full_name.split('/')
-      const [files, languages] = await Promise.all([
-        fetchGithubRootEntries(owner, repo.name, identity),
-        fetchGithubRepoLanguages(owner, repo.name, identity),
-      ])
-      // The root listing tells us whether package.json exists, so non-JS
-      // repositories skip an extra request that would 404.
-      const dependencies = files?.includes('package.json')
-        ? await fetchGithubPackageDependencies(owner, repo.name, identity)
-        : null
-      if (dependencies !== null) packageJsonCount++
-      const primary = repo.language && normalizeTechnology(repo.language)
-      return {
-        ...repo,
-        technologies: mergeTechnologies(
-          existing.get(repo.id),
-          dependencies && technologiesFromPackageDependencies(dependencies),
-          files && technologiesFromManifestFiles(files),
-          languages?.filter(language => normalizeTechnology(language) !== primary),
-        )
+      try {
+        return await enrichRepository(repo, existing, userId, accessToken)
+      } catch {
+        // One malformed or inaccessible manifest must not abort the import;
+        // the repository still syncs with its previously known technologies.
+        return { repo: { ...repo, technologies: existing.get(repo.id) || [] } as IndexedRepo, packageJson: false, failed: true }
       }
     }))
-    indexed.push(...batch)
+    for (const result of batch) {
+      if (result.packageJson) packageJsonCount++
+      if ('failed' in result) enrichmentFailures++
+      indexed.push(result.repo)
+    }
   }
-  return { repos: indexed, packageJsonCount }
+  return { repos: indexed, packageJsonCount, enrichmentFailures, enrichmentComplete }
 }
 
 export async function POST(request: Request) {
@@ -60,13 +91,15 @@ export async function POST(request: Request) {
     const providerToken = await getProviderToken(context)
 
     if (!providerToken) {
-      return NextResponse.json({ 
-        error: 'No GitHub provider token found. Please re-authenticate or provide a Personal Access Token.' 
+      return NextResponse.json({
+        error: 'No GitHub provider token found. Please re-authenticate or provide a Personal Access Token.'
       }, { status: 400 })
     }
 
-    // Fetch repos from GitHub
-    const repos = await fetchGithubRepos({ userId, accessToken: providerToken })
+    const identity = { userId, accessToken: providerToken }
+    // Fetch repos from GitHub alongside a scope probe. The probe is advisory:
+    // a null result leaves the recorded private-access capability unchanged.
+    const [repos, scopes] = await Promise.all([fetchGithubRepos(identity), fetchGithubTokenScopes(identity)])
 
     // Sync to Supabase projects table
     const { data: profile, error: profileError } = await supabase
@@ -105,6 +138,8 @@ export async function POST(request: Request) {
         homepage: repo.homepage,
         stargazers_count: repo.stargazers_count,
         pushed_at: repo.pushed_at,
+        github_created_at: repo.github_created_at,
+        is_private: repo.is_private,
         technologies: repo.technologies,
         updated_at: new Date().toISOString(),
       })), {
@@ -113,12 +148,23 @@ export async function POST(request: Request) {
 
       if (error) throw error
       syncedCount += batch.length
-      
-      // Note: Triggering AI processing (Gemini) can be done asynchronously via another background worker/route
-      // or here if we want to wait, but it's better to queue it to avoid Vercel 10s timeouts.
     }
 
-    return NextResponse.json({ message: 'Sync complete', syncedCount, packageJsonCount })
+    // Completed-catalog bookkeeping lives on the profile so webhook writes and
+    // partial batches cannot masquerade as a full sync. A failure here must
+    // not misreport the confirmed project writes above.
+    const profileUpdate: Record<string, unknown> = { last_catalog_sync_at: new Date().toISOString() }
+    if (scopes !== null) profileUpdate.github_private_scope = scopes.includes('repo')
+    const { error: syncMarkError } = await supabase.from('profiles').update(profileUpdate).eq('id', userId)
+    if (syncMarkError) console.warn('Unable to record completed catalog sync')
+
+    return NextResponse.json({
+      message: 'Sync complete',
+      syncedCount,
+      packageJsonCount,
+      enrichmentFailures: indexed.enrichmentFailures,
+      enrichmentComplete: indexed.enrichmentComplete,
+    })
 
   } catch (error) {
     const response = apiErrorResponse(error)

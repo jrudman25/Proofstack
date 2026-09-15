@@ -11,6 +11,7 @@ export type GithubRepo = {
   id: number; name: string; full_name: string; description: string | null
   html_url: string; language: string | null; homepage: string | null
   stargazers_count: number; pushed_at: string | null
+  is_private: boolean; github_created_at: string | null
 }
 
 function unavailable(): never { throw new ApiError(503, 'GitHub service temporarily unavailable') }
@@ -62,6 +63,10 @@ function parseRepos(value: unknown, limit: number): GithubRepo[] {
   return value.map((repo: unknown) => {
     if (!repo || typeof repo !== 'object' || Array.isArray(repo)) unavailable()
     const r = repo as Record<string, unknown>
+    // Cache entries hold the parsed shape (is_private/github_created_at);
+    // live API payloads use GitHub's raw names (private/created_at).
+    const isPrivate = r.private ?? r.is_private
+    const createdAt = r.created_at ?? r.github_created_at
     const nullableText = (v: unknown) => v === null || typeof v === 'string'
     if (!Number.isSafeInteger(r.id) || (r.id as number) < 1
       || typeof r.name !== 'string' || !/^[\w.-]+$/.test(r.name) || r.name === '.' || r.name === '..'
@@ -69,13 +74,16 @@ function parseRepos(value: unknown, limit: number): GithubRepo[] {
       || !nullableText(r.description) || !nullableText(r.language) || !nullableText(r.homepage)
       || !Number.isSafeInteger(r.stargazers_count) || (r.stargazers_count as number) < 0
       || !(r.pushed_at === null || (typeof r.pushed_at === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(r.pushed_at) && Number.isFinite(Date.parse(r.pushed_at))))
+      || !(createdAt === null || (typeof createdAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(createdAt) && Number.isFinite(Date.parse(createdAt))))
+      || typeof isPrivate !== 'boolean'
       || r.html_url !== `https://github.com/${r.full_name}`) unavailable()
     if (r.homepage) {
       try { if (!['https:', 'http:'].includes(new URL(r.homepage as string).protocol)) unavailable() } catch { unavailable() }
     }
     return { id: r.id, name: r.name, full_name: r.full_name, description: r.description,
       html_url: r.html_url, language: r.language, homepage: r.homepage,
-      stargazers_count: r.stargazers_count, pushed_at: r.pushed_at } as GithubRepo
+      stargazers_count: r.stargazers_count, pushed_at: r.pushed_at,
+      is_private: isPrivate, github_created_at: createdAt } as GithubRepo
   })
 }
 
@@ -112,6 +120,33 @@ export async function fetchGithubRepos(identity: GithubIdentity): Promise<Github
   } catch (error) {
     if (error instanceof ApiError) throw error
     unavailable()
+  }
+}
+
+// Returns the OAuth scopes granted to the current token, or null when the
+// probe fails. Scope detection is bookkeeping: a null result must never fail
+// a sync, it only leaves the recorded capability unchanged.
+export async function fetchGithubTokenScopes(identity: GithubIdentity): Promise<string[] | null> {
+  try {
+    if (!identity.accessToken?.trim()) return null
+    const redis = createRedis()
+    const key = cacheKey(identity, 'github-token-scopes')
+    const cached = await redis.get(key)
+    if (cached !== null) {
+      if (!Array.isArray(cached) || cached.length > 50
+        || cached.some(scope => typeof scope !== 'string' || scope.length > 100)) return null
+      return cached as string[]
+    }
+    const res = await fetch('https://api.github.com/user', {
+      headers: headers(identity, 'application/vnd.github+json'), redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) return null
+    const scopes = (res.headers.get('x-oauth-scopes') || '').split(',').map(scope => scope.trim()).filter(Boolean)
+    await redis.set(key, scopes, { ex: 3600 })
+    return scopes
+  } catch {
+    return null
   }
 }
 

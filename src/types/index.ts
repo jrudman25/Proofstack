@@ -10,6 +10,9 @@ export type Project = {
   homepage: string | null
   stargazers_count: number
   pushed_at: string | null
+  github_created_at: string | null
+  is_private: boolean
+  ai_opt_in: boolean
   summary: string | null
   technologies: string[]
   has_code_map: boolean
@@ -39,6 +42,15 @@ export type ProjectBrief = {
   updated_at: string
 }
 
+// The subset of owner-authored brief fields surfaced on dashboard cards.
+export type ProjectBriefSummary = Pick<ProjectBrief, 'purpose' | 'lifecycle_status' | 'owner_verified_at'>
+
+// The dashboard needs no user_id, github_repo_id, has_code_map, or summary
+// columns; cards additionally carry the owner brief when one exists.
+export type DashboardProject = Omit<Project, 'user_id' | 'github_repo_id' | 'has_code_map' | 'summary'> & {
+  brief: ProjectBriefSummary | null
+}
+
 export type PortfolioBriefing = {
   summary: string
   themes: { title: string; detail: string; projectIds: string[] }[]
@@ -47,6 +59,14 @@ export type PortfolioBriefing = {
   evidenceGaps: string[]
   interviewQuestions: string[]
   citations: { projectId: string; name: string; url: string; evidence: ('github' | 'owner')[] }[]
+}
+
+// A briefing persisted server-side together with the time it was generated
+// and how many synced repositories changed since that generation.
+export type StoredBriefing = {
+  briefing: PortfolioBriefing
+  generatedAt: string
+  changedCount: number
 }
 
 export type Todo = {
