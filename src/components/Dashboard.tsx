@@ -227,7 +227,9 @@ export default function Dashboard({
   user?: DashboardUser | null
 }) {
   const router = useRouter()
-  const [projects] = useState<Project[]>(initialProjects)
+  // Read server-provided projects directly so router.refresh() actually
+  // updates cards, counts, sync date, and briefing eligibility.
+  const projects = initialProjects
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'updated' | 'stars' | 'name'>('updated')
   const [isSyncing, setIsSyncing] = useState(false)

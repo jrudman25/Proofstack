@@ -6,6 +6,7 @@ export const API_LIMITS = {
   briefing: { limit: 5, windowSeconds: 300 },
   sync: { limit: 5, windowSeconds: 300 },
   'process-project': { limit: 10, windowSeconds: 300 },
+  'project-brief': { limit: 20, windowSeconds: 60 },
 } as const
 
 const script = `

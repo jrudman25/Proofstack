@@ -237,6 +237,10 @@ export async function fetchGithubReadme(owner: string, repo: string, identity: G
     const key = cacheKey(identity, 'github-readme', owner, repo)
     const cached = await redis.get(key)
     if (cached !== null) {
+      // Missing READMEs are cached as a marker object for one hour, like the
+      // sibling fetchers; stored READMEs remain plain strings.
+      if (typeof cached === 'object' && !Array.isArray(cached)
+        && (cached as Record<string, unknown>).found === false) return null
       if (typeof cached !== 'string' || Buffer.byteLength(cached, 'utf8') > 1024 * 1024) unavailable()
       return cached
     }
@@ -245,7 +249,10 @@ export async function fetchGithubReadme(owner: string, repo: string, identity: G
       signal: AbortSignal.timeout(15_000),
     })
     if (!res.ok) {
-      if (res.status === 404) return null
+      if (res.status === 404) {
+        await redis.set(key, { found: false }, { ex: 3600 })
+        return null
+      }
       unavailable()
     }
     const data = new TextDecoder('utf-8', { fatal: true }).decode(await readBodyBytes(res, 1024 * 1024))

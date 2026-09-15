@@ -74,6 +74,18 @@ it('keeps the briefing as the only primary action and disables it without projec
   expect(screen.getByText(/Sync your GitHub account/)).toBeInTheDocument()
 })
 
+it('reflects refreshed server projects and briefing eligibility without losing search', () => {
+  const { rerender } = render(<Dashboard initialProjects={[]} />)
+  expect(screen.getByText(/Sync your GitHub account/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeDisabled()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search projects and technologies' }), { target: { value: 'Example' } })
+  rerender(<Dashboard initialProjects={[project]} />)
+  expect(screen.getByRole('link', { name: 'Example' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeEnabled()
+  expect(screen.getByText('Synced 2026-03-04')).toBeInTheDocument()
+  expect(screen.getByRole('textbox', { name: 'Search projects and technologies' })).toHaveValue('Example')
+})
+
 it('refreshes server data after a successful sync and reports the count', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ syncedCount: 3 }) }))
   render(<Dashboard initialProjects={[project]} />)

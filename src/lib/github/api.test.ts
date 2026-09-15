@@ -126,6 +126,13 @@ describe('GitHub helpers', () => {
     await expect(fetchGithubPackageDependencies('owner', '..', identity)).rejects.toThrow()
     expect(fetch).toHaveBeenCalledTimes(2)
   })
+  it('negative-caches missing READMEs like the other fetchers', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response('', { status: 404 }))
+    expect(await fetchGithubReadme('owner', 'missing', identity)).toBeNull()
+    expect(await fetchGithubReadme('owner', 'missing', identity)).toBeNull()
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(io.set).toHaveBeenCalledWith(expect.any(String), { found: false }, { ex: 3600 })
+  })
   it('returns null for missing READMEs and rejects path traversal before fetching', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('', { status: 404 }))
     expect(await fetchGithubReadme('owner', 'repo', identity)).toBeNull()

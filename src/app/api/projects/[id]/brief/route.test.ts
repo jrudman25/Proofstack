@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { GET, PATCH } from './route'
 
-const io = vi.hoisted(() => ({ getUser: vi.fn(), from: vi.fn(), projectSingle: vi.fn(), briefSingle: vi.fn(), upsert: vi.fn() }))
+const io = vi.hoisted(() => ({ getUser: vi.fn(), from: vi.fn(), projectSingle: vi.fn(), briefSingle: vi.fn(), upsert: vi.fn(), eval: vi.fn() }))
 vi.mock('next/headers', () => ({ cookies: async () => ({ getAll: () => [], set: vi.fn() }) }))
 vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth: { getUser: io.getUser }, from: io.from }) }))
+vi.mock('@upstash/redis', () => ({ Redis: class { eval = io.eval } }))
 
 const userId = '12345678-1234-1234-1234-123456789abc'
 const projectId = '22345678-1234-1234-1234-123456789abc'
@@ -50,6 +51,9 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co')
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'test-key')
+  vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.example.com')
+  vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'test-token')
+  io.eval.mockResolvedValue([1, 60])
   io.getUser.mockResolvedValue({ data: { user: { id: userId } }, error: null })
   io.projectSingle.mockResolvedValue({ data: project, error: null })
   io.briefSingle.mockResolvedValue({ data: brief, error: null })
@@ -98,6 +102,24 @@ it.each([
 ])('rejects malformed or protected fields before database access', async value => {
   const response = await PATCH(patch(value), context)
   expect(response.status).toBe(400)
+  expect(io.from).not.toHaveBeenCalled()
+})
+
+it.each(['GET', 'PATCH'])('fails closed on %s rate limit before database access', async method => {
+  io.eval.mockResolvedValue([21, 45])
+  const response = method === 'GET'
+    ? await GET(new Request(`https://app.test/api/projects/${projectId}/brief`), context)
+    : await PATCH(patch(), context)
+  expect(response.status).toBe(429)
+  expect(response.headers.get('retry-after')).toBe('45')
+  expect(io.from).not.toHaveBeenCalled()
+})
+
+it('sanitizes rate-limit backend failures', async () => {
+  io.eval.mockRejectedValue(new Error('secret-redis'))
+  const response = await PATCH(patch(), context)
+  expect(response.status).toBe(503)
+  expect(await response.text()).not.toContain('secret-redis')
   expect(io.from).not.toHaveBeenCalled()
 })
 
