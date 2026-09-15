@@ -1,4 +1,7 @@
 -- Add this to setup.sql or run in SQL editor
+-- The vector type lives in the extensions schema; resolve it for the
+-- signatures below.
+set search_path = public, extensions, pg_temp;
 
 create or replace function match_project_embeddings (
   query_embedding vector(768),

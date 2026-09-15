@@ -6,6 +6,9 @@ const sql = (name: string) => readFileSync(resolve(process.cwd(), 'supabase', na
 const migration = sql('migrations/20260906000000_production_hardening.sql')
 const credentialsMigration = sql('migrations/20260909000000_github_credentials.sql')
 const projectBriefsMigration = sql('migrations/20260912000000_project_briefs.sql')
+const phase1Migration = sql('migrations/20260914000000_phase1_portfolio.sql')
+const definerMigration = sql('migrations/20260914000001_restrict_definer_functions.sql')
+const vectorMigration = sql('migrations/20260914000002_move_vector_extension.sql')
 const setup = sql('setup.sql')
 const functions = sql('functions.sql')
 
@@ -42,6 +45,33 @@ it('adds owner-isolated project briefs without changing legacy project data', ()
   expect(projectBriefsMigration).not.toMatch(/\bdelete\s+from\b|\btruncate\b|\bdrop\s+table\b|\bdisable\s+row\s+level\s+security\b|\bdrop\s+policy\b/)
   expect(projectBriefsMigration).toContain('create table if not exists')
   expect(projectBriefsMigration).toContain('if not exists (select 1 from pg_policies')
+})
+it('adds private-repository consent, GitHub provenance and persisted briefings without weakening RLS', () => {
+  for (const text of [setup, phase1Migration]) {
+    expect(text).toMatch(/is_private boolean (?:not null default false|default false not null)/)
+    expect(text).toMatch(/ai_opt_in boolean (?:not null default false|default false not null)/)
+    expect(text).toContain('github_created_at timestamp with time zone')
+    expect(text).toContain('last_catalog_sync_at timestamp with time zone')
+    expect(text).toMatch(/github_private_scope boolean (?:not null default false|default false not null)/)
+    expect(text).toContain('portfolio_briefings')
+    expect(text).toContain('enable row level security')
+    expect(text).toMatch(/portfolio_briefings[\s\S]*auth\.uid\(\) = user_id/)
+  }
+  expect(phase1Migration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
+  expect(phase1Migration).not.toMatch(/\bdelete\s+from\b|\btruncate\b|\bdrop\s+table\b|\bdisable\s+row\s+level\s+security\b|\bdrop\s+policy\b/)
+  expect(phase1Migration).toContain('add column if not exists')
+  expect(phase1Migration).toContain('create table if not exists')
+  expect(phase1Migration).toContain('if not exists (select 1 from pg_policies')
+})
+it('revokes browser-role execution from security definer functions', () => {
+  expect(definerMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
+  expect(definerMigration).toContain('revoke all on function public.handle_new_user() from public, anon, authenticated')
+  expect(definerMigration).toContain('revoke all on function public.rls_auto_enable() from public, anon, authenticated')
+})
+it('moves the vector extension out of the public schema', () => {
+  expect(vectorMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
+  expect(vectorMigration).toContain('alter extension vector set schema extensions')
+  expect(setup).toContain('create extension if not exists vector with schema extensions')
 })
 it('aligns fresh setup and migration uniqueness, cosine search and indexes', () => {
   for (const text of [setup, migration]) {

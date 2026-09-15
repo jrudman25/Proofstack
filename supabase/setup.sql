@@ -1,5 +1,9 @@
--- Enable pgvector extension
-create extension if not exists vector;
+-- Enable pgvector extension inside the dedicated extensions schema so no
+-- extension objects live in the API-exposed public schema.
+create extension if not exists vector with schema extensions;
+-- Resolve extension-provided types (vector) and operator classes for the
+-- remainder of this script.
+set search_path = public, extensions, pg_temp;
 
 -- Create profiles table
 create table profiles (
@@ -7,6 +11,8 @@ create table profiles (
   github_username text unique not null,
   avatar_url text,
   full_name text,
+  last_catalog_sync_at timestamp with time zone,
+  github_private_scope boolean default false not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
@@ -29,6 +35,9 @@ create table projects (
   homepage text,
   stargazers_count integer default 0,
   pushed_at timestamp with time zone,
+  github_created_at timestamp with time zone,
+  is_private boolean default false not null,
+  ai_opt_in boolean default false not null,
   summary text,
   technologies text[] default '{}',
   has_code_map boolean default false,
@@ -53,6 +62,17 @@ create table project_briefs (
   last_reviewed_at timestamp with time zone,
   ai_draft jsonb default '{}'::jsonb not null,
   ai_draft_generated_at timestamp with time zone,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Latest generated portfolio briefing per user; evidence records the project
+-- ids and pushed_at values the briefing was built from for staleness checks.
+create table portfolio_briefings (
+  user_id uuid references profiles(id) on delete cascade primary key,
+  briefing jsonb not null,
+  generated_at timestamp with time zone not null,
+  evidence jsonb default '{}'::jsonb not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -102,6 +122,7 @@ revoke all on table github_credentials from anon, authenticated;
 grant select, insert, update, delete on table github_credentials to service_role;
 alter table projects enable row level security;
 alter table project_briefs enable row level security;
+alter table portfolio_briefings enable row level security;
 alter table milestones enable row level security;
 alter table todos enable row level security;
 alter table project_embeddings enable row level security;
@@ -130,6 +151,11 @@ create policy "Users can update own project briefs" on project_briefs for update
 create policy "Users can delete own project briefs" on project_briefs for delete using (
   exists (select 1 from projects where projects.id = project_briefs.project_id and projects.user_id = auth.uid())
 );
+
+create policy "Users can view own portfolio briefings" on portfolio_briefings for select using (auth.uid() = user_id);
+create policy "Users can insert own portfolio briefings" on portfolio_briefings for insert with check (auth.uid() = user_id);
+create policy "Users can update own portfolio briefings" on portfolio_briefings for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "Users can delete own portfolio briefings" on portfolio_briefings for delete using (auth.uid() = user_id);
 
 -- Milestones policies
 create policy "Users can view own project milestones" on milestones for select using (
@@ -191,3 +217,15 @@ $$ language plpgsql security definer set search_path = '';
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- Security-definer functions are never invoked by clients: handle_new_user
+-- runs only from the trigger above, and rls_auto_enable is a platform helper.
+revoke all on function public.handle_new_user() from public, anon, authenticated;
+do $$
+begin
+  if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'rls_auto_enable' and p.pronargs = 0) then
+    revoke all on function public.rls_auto_enable() from public, anon, authenticated;
+  end if;
+end;
+$$;
