@@ -60,7 +60,7 @@ Follow existing security boundaries: authenticate server requests with verified 
 
 ## Verification
 
-Use the committed lockfile and Node.js 22 LTS.
+Use the committed lockfile and Node.js 24 LTS.
 
 ```bash
 npm test
