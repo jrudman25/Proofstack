@@ -20,6 +20,13 @@ describe('package technology detection', () => {
     ])).toEqual(['Angular', 'SvelteKit', 'Svelte', 'NestJS', 'Remix'])
   })
 
+  it('identifies data and AI platform SDKs from scoped packages', () => {
+    expect(technologiesFromPackageDependencies([
+      '@tanstack/react-query', '@heroui/react', '@nextui-org/system', '@upstash/redis',
+      '@neondatabase/serverless', '@google/genai', '@google/generative-ai', 'redis', 'private-package'
+    ])).toEqual(['TanStack', 'HeroUI', 'Upstash', 'Neon', 'Gemini', 'Redis'])
+  })
+
   it('merges manifest and existing values using punctuation-insensitive names', () => {
     expect(mergeTechnologies(['NextJS', 'Custom Tool'], ['Next.js', 'React'])).toEqual(['Next.js', 'Custom Tool', 'React'])
   })

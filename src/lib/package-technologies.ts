@@ -50,6 +50,10 @@ const DEPENDENCY_TECHNOLOGIES: Record<string, string> = {
   axios: 'Axios',
   sanity: 'Sanity',
   'aws-sdk': 'AWS',
+  redis: 'Redis',
+  '@google/genai': 'Gemini',
+  '@google/generative-ai': 'Gemini',
+  '@ai-sdk/google': 'Gemini',
 }
 
 function technologyForDependency(dependency: string) {
@@ -74,6 +78,10 @@ function technologyForDependency(dependency: string) {
   if (name.startsWith('@ionic/')) return 'Ionic'
   if (name.startsWith('@capacitor/')) return 'Capacitor'
   if (name.startsWith('@tailwindcss/')) return 'Tailwind CSS'
+  // NextUI was renamed HeroUI; both scopes resolve to the current name.
+  if (name.startsWith('@heroui/') || name.startsWith('@nextui-org/')) return 'HeroUI'
+  if (name.startsWith('@upstash/')) return 'Upstash'
+  if (name.startsWith('@neondatabase/')) return 'Neon'
   return null
 }
 

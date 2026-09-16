@@ -67,6 +67,7 @@ const MANIFEST_TECHNOLOGIES: Record<string, string> = {
   'serverless.yml': 'Serverless',
   'serverless.yaml': 'Serverless',
   'fly.toml': 'Fly.io',
+  'northflank.json': 'Northflank',
   'chart.yaml': 'Helm',
   'ansible.cfg': 'Ansible',
   vagrantfile: 'Vagrant',
