@@ -29,16 +29,21 @@ it('generates and presents a briefing with provenance labels and internal projec
   expect(screen.getByText('GitHub metadata + Owner notes')).toBeInTheDocument()
   expect(screen.getByText(/AI-generated 2026-09-14/)).toBeInTheDocument()
   expect(screen.getByText('Add measurable outcomes.')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Regenerate briefing' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument()
 })
 
-it('shows a persisted briefing with its generated date and changed-repository count', () => {
+it('keeps a persisted briefing compact until the user expands it', () => {
   render(<PortfolioBriefingPanel projectCount={2}
     initial={{ briefing, generatedAt: '2026-09-10T00:00:00.000Z', changedCount: 1 }} />)
-  expect(screen.getByText(briefing.summary)).toBeInTheDocument()
+  expect(screen.queryByText(briefing.summary)).not.toBeInTheDocument()
   expect(screen.getByText(/AI-generated 2026-09-10/)).toBeInTheDocument()
-  expect(screen.getByText(/1 repository changed since/)).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Regenerate briefing' })).toBeInTheDocument()
+  expect(screen.getByText(/1 repository changed/)).toBeInTheDocument()
+  const toggle = screen.getByRole('button', { name: 'Show briefing' })
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  fireEvent.click(toggle)
+  expect(screen.getByText(briefing.summary)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Hide briefing' })).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument()
 })
 
 it('disables generation and explains the prerequisite when no projects are synced', () => {

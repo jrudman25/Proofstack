@@ -62,7 +62,7 @@ export default function LoginPage() {
       <p className="eyebrow mt-8 text-center text-dim">
         GitHub access: public_repo · read:user · user:email
       </p>
-      <a href="/privacy" className="eyebrow mt-3 text-faint transition-colors hover:text-dim">
+      <a href="/privacy" className="eyebrow mt-3 text-dim transition-colors hover:text-foreground">
         Privacy and data use
       </a>
     </div>

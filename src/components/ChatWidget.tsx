@@ -175,7 +175,7 @@ export default function ChatWidget({ projectId, projectName }: { projectId?: str
                   ? 'border-brand-dim bg-brand/10 text-foreground'
                   : 'border-line bg-raised text-foreground/90'
               }`}>
-                <span className={`eyebrow mb-1 block ${msg.role === 'user' ? 'text-brand' : 'text-faint'}`}>
+                <span className={`eyebrow mb-1 block ${msg.role === 'user' ? 'text-brand' : 'text-dim'}`}>
                   {msg.role === 'user' ? 'You' : 'Proofstack'}
                 </span>
                 {msg.role === 'user' ? (

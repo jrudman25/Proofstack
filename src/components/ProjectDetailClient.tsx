@@ -216,7 +216,7 @@ export default function ProjectDetailClient({
             </a>
           </div>
 
-          <div className="eyebrow mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line pt-4 text-faint">
+          <div className="eyebrow mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line pt-4 text-dim">
             {project.language && (
               <span className="flex items-center gap-1.5 text-dim">
                 <span className="h-2 w-2 rounded-full" style={{ backgroundColor: languageColor(project.language) }} />
@@ -309,12 +309,12 @@ export default function ProjectDetailClient({
               <div>
                 <h2 className="label flex items-baseline justify-between text-dim">
                   Milestones
-                  <span className="eyebrow text-faint">{String(openMilestones).padStart(2, '0')} open</span>
+                  <span className="eyebrow text-dim">{String(openMilestones).padStart(2, '0')} open</span>
                 </h2>
 
                 <div className="mb-6 mt-5 space-y-2">
                   {milestones.length === 0 ? (
-                    <p className="font-mono text-[11px] italic text-faint">No milestones yet.</p>
+                    <p className="font-mono text-[11px] italic text-dim">No milestones yet.</p>
                   ) : (
                     milestones.map(milestone => (
                       <div key={milestone.id} className="flex items-start gap-3 border border-line/60 bg-ink px-3 py-2.5">
@@ -360,12 +360,12 @@ export default function ProjectDetailClient({
               <div>
                 <h2 className="label flex items-baseline justify-between text-dim">
                   Tasks
-                  <span className="eyebrow text-faint">{String(openTodos).padStart(2, '0')} open</span>
+                  <span className="eyebrow text-dim">{String(openTodos).padStart(2, '0')} open</span>
                 </h2>
 
                 <div className="mb-6 mt-5 max-h-[400px] space-y-1 overflow-y-auto pr-2">
                   {todos.length === 0 ? (
-                    <p className="font-mono text-[11px] italic text-faint">No tasks yet.</p>
+                    <p className="font-mono text-[11px] italic text-dim">No tasks yet.</p>
                   ) : (
                     todos.map(todo => (
                       <div key={todo.id} className="group flex items-center justify-between px-2 py-1.5 transition-colors hover:bg-ink">

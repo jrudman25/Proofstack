@@ -220,7 +220,7 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
               <label key={key} className="space-y-2 md:col-span-2">
                 <span className="eyebrow flex items-baseline justify-between text-dim">
                   {label}
-                  <span className="font-mono text-[10px] normal-case tracking-normal text-faint">{form[key].length}/{BRIEF_FIELD_LIMIT}</span>
+                  <span className="font-mono text-[10px] normal-case tracking-normal text-dim">{form[key].length}/{BRIEF_FIELD_LIMIT}</span>
                 </span>
                 <textarea
                   aria-label={label}
@@ -238,14 +238,14 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
           <details className="border border-line">
             <summary className="label cursor-pointer select-none px-4 py-3 text-dim transition-colors hover:text-foreground">
               More context
-              <span className="ml-3 font-normal normal-case tracking-normal text-faint">Inspiration, architecture, outcomes, lessons</span>
+              <span className="ml-3 font-normal normal-case tracking-normal text-dim">Inspiration, architecture, outcomes, lessons</span>
             </summary>
             <div className="grid gap-5 border-t border-line p-5 md:grid-cols-2">
               {NARRATIVE_FIELDS.filter(({ primary }) => !primary).map(({ key, label, prompt }) => (
                 <label key={key} className="space-y-2 md:col-span-2">
                   <span className="eyebrow flex items-baseline justify-between text-dim">
                     {label}
-                    <span className="font-mono text-[10px] normal-case tracking-normal text-faint">{form[key].length}/{BRIEF_FIELD_LIMIT}</span>
+                    <span className="font-mono text-[10px] normal-case tracking-normal text-dim">{form[key].length}/{BRIEF_FIELD_LIMIT}</span>
                   </span>
                   <textarea
                     aria-label={label}
@@ -264,7 +264,7 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
           <details className="border border-line">
             <summary className="label cursor-pointer select-none px-4 py-3 text-dim transition-colors hover:text-foreground">
               Settings
-              <span className="ml-3 font-normal normal-case tracking-normal text-faint">Lifecycle status and future portfolio visibility</span>
+              <span className="ml-3 font-normal normal-case tracking-normal text-dim">Lifecycle status and future portfolio visibility</span>
             </summary>
             <div className="grid gap-5 border-t border-line p-5 md:grid-cols-2">
               <label className="space-y-2">
@@ -295,7 +295,7 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
                   <option value="private">Private workspace</option>
                   <option value="public">Selected for future public profile</option>
                 </select>
-                <span className="block text-xs leading-relaxed text-faint">Selecting public does not publish anything yet.</span>
+                <span className="block text-xs leading-relaxed text-dim">Selecting public does not publish anything yet.</span>
               </label>
             </div>
           </details>
@@ -313,12 +313,12 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
                   {form.ownerVerified && <Check className="h-3.5 w-3.5 text-brand" />}
                   Mark this content as owner reviewed
                 </span>
-                <span className="mt-0.5 block text-xs leading-relaxed text-faint">Only verify statements you are comfortable presenting as your own.</span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-dim">Only verify statements you are comfortable presenting as your own.</span>
               </span>
             </label>
 
             <div className="flex items-center justify-end gap-4">
-              <span className="font-mono text-[10px] text-faint">{totalLength.toLocaleString()}/{BRIEF_TOTAL_LIMIT.toLocaleString()}</span>
+              <span className="font-mono text-[10px] text-dim">{totalLength.toLocaleString()}/{BRIEF_TOTAL_LIMIT.toLocaleString()}</span>
               {message && <span role="status" className="font-mono text-[11px] text-dim">{message}</span>}
               {conflict && (
                 <Button type="button" variant="outline" onClick={reloadLatest} className="eyebrow">Reload latest</Button>
