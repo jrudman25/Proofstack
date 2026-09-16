@@ -80,9 +80,10 @@ export async function POST(request: Request) {
   try {
     const context = await authenticateUser()
     const { supabase, userId } = context
+    let connectPrivate = false
     if (request.body) {
       const body = await readJsonBody(request, 1024, { allowEmpty: true })
-      if (body !== undefined) objectBody(body)
+      if (body !== undefined) connectPrivate = objectBody(body).connectPrivate === true
     }
     await enforceRateLimit(context, 'sync')
 
@@ -104,7 +105,7 @@ export async function POST(request: Request) {
     // Sync to Supabase projects table
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('id')
+      .select('id, github_private_scope')
       .eq('id', userId)
       .single()
 
@@ -112,6 +113,13 @@ export async function POST(request: Request) {
     if (!profile || profile.id !== userId) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
     }
+
+    // The flag records the owner's choice, not the token's capability: it is
+    // enabled only through the explicit connect flow, so disconnecting stays
+    // disconnected even while the GitHub grant still carries the repo scope.
+    const includePrivate = profile.github_private_scope === true
+      || (connectPrivate && scopes !== null && scopes.includes('repo'))
+    const visibleRepos = includePrivate ? repos : repos.filter(repo => !repo.is_private)
 
     const { data: existingProjects, error: existingError } = await supabase
       .from('projects')
@@ -121,7 +129,7 @@ export async function POST(request: Request) {
     const existingTechnologies = new Map(((existingProjects || []) as ExistingProject[]).map(project => [
       Number(project.github_repo_id), project.technologies || []
     ]))
-    const indexed = await addManifestTechnologies(repos, existingTechnologies, userId, providerToken)
+    const indexed = await addManifestTechnologies(visibleRepos, existingTechnologies, userId, providerToken)
     packageJsonCount = indexed.packageJsonCount
 
     for (let offset = 0; offset < indexed.repos.length; offset += 100) {
@@ -153,8 +161,10 @@ export async function POST(request: Request) {
     // Completed-catalog bookkeeping lives on the profile so webhook writes and
     // partial batches cannot masquerade as a full sync. A failure here must
     // not misreport the confirmed project writes above.
-    const profileUpdate: Record<string, unknown> = { last_catalog_sync_at: new Date().toISOString() }
-    if (scopes !== null) profileUpdate.github_private_scope = scopes.includes('repo')
+    const profileUpdate: Record<string, unknown> = {
+      last_catalog_sync_at: new Date().toISOString(),
+      github_private_scope: includePrivate,
+    }
     const { error: syncMarkError } = await supabase.from('profiles').update(profileUpdate).eq('id', userId)
     if (syncMarkError) console.warn('Unable to record completed catalog sync')
 

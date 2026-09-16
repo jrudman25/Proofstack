@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { DashboardProject, StoredBriefing } from '@/types'
 import { RefreshCw, Star, LogOut, Lock, Settings } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/GithubIcon'
+import { TechBrandIcon, techBrandMark } from '@/components/icons/TechBrandIcon'
 import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/utils/supabase/client'
@@ -15,6 +16,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import PortfolioBriefingPanel from '@/components/PortfolioBriefingPanel'
 import ChatWidget from '@/components/ChatWidget'
+import packageJson from '../../package.json'
 
 // Keys are technology names normalized to lowercase alphanumerics so that
 // "Next.js", "NextJS" and "nextjs" resolve to the same icon without substring
@@ -187,6 +189,7 @@ const DEVICON_BY_TECHNOLOGY: Record<string, string> = {
   amazonwebservices: 'devicon-amazonwebservices-plain-wordmark',
   ember: 'devicon-ember-plain',
   backbonejs: 'devicon-backbonejs-plain',
+  redis: 'devicon-redis-plain',
 }
 const deviconFor = (tech: string) => DEVICON_BY_TECHNOLOGY[normalizeTechnology(tech)] ?? null
 
@@ -200,6 +203,10 @@ const stackTechnologies = (project: DashboardProject) => {
   }
   return Array.from(technologies.values())
 }
+
+// Survives the GitHub re-authorization redirect so the dashboard knows to
+// re-sync and import the newly visible private repositories.
+const CONNECT_PRIVATE_PENDING = 'proofstack:connect-private'
 
 const SORTS = [
   { key: 'updated', label: 'Recently Updated' },
@@ -244,15 +251,22 @@ export default function Dashboard({
   const projects = initialProjects
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'updated' | 'stars' | 'name'>('updated')
+  const [repositoryVisibility, setRepositoryVisibility] = useState<'all' | 'public' | 'private'>('all')
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   const [connectMessage, setConnectMessage] = useState('')
+  const [connectPending, setConnectPending] = useState(false)
 
-  const handleSync = async () => {
+  const handleSync = async (connectPrivate = false) => {
     setIsSyncing(true)
     setSyncMessage('')
     try {
-      const res = await fetch('/api/sync', { method: 'POST' })
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+        ...(connectPrivate
+          ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectPrivate: true }) }
+          : {}),
+      })
       const data = await res.json()
       if (res.ok) {
         const incomplete = data.enrichmentComplete === false
@@ -272,19 +286,40 @@ export default function Dashboard({
     }
   }
 
+  // Resuming a sync after the OAuth round-trip makes the re-authorization
+  // visible: private repositories are imported and the banner clears.
+  const syncRef = useRef(handleSync)
+  syncRef.current = handleSync
+  useEffect(() => {
+    if (sessionStorage.getItem(CONNECT_PRIVATE_PENDING)) {
+      sessionStorage.removeItem(CONNECT_PRIVATE_PENDING)
+      void syncRef.current(true)
+    }
+  }, [])
+
   // Upgrades the GitHub grant from public_repo to repo so private
   // repositories can be imported; the user returns to the dashboard.
   const handleConnectPrivate = async () => {
     setConnectMessage('')
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: {
-        redirectTo: `${location.origin}/auth/callback?next=/`,
-        scopes: 'repo read:user user:email'
-      },
-    })
-    if (error) setConnectMessage('Unable to start GitHub authorization. Please try again.')
+    setConnectPending(true)
+    try {
+      sessionStorage.setItem(CONNECT_PRIVATE_PENDING, '1')
+      const supabase = createClient()
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'github',
+        options: {
+          // Must match an allow-listed redirect URL exactly, like the sign-in
+          // flow; a stray query string can bounce the whole authorization.
+          redirectTo: `${location.origin}/auth/callback`,
+          scopes: 'repo read:user user:email'
+        },
+      })
+      if (error) throw error
+    } catch {
+      sessionStorage.removeItem(CONNECT_PRIVATE_PENDING)
+      setConnectPending(false)
+      setConnectMessage('Unable to start GitHub authorization. Please try again.')
+    }
   }
 
   const handleSignOut = async () => {
@@ -295,9 +330,10 @@ export default function Dashboard({
 
   const filteredAndSorted = useMemo(() => {
     const result = projects.filter(p =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      (p.description?.toLowerCase() || '').includes(search.toLowerCase()) ||
-      (p.technologies || []).some(t => t.toLowerCase().includes(search.toLowerCase()))
+      (repositoryVisibility === 'all' || (repositoryVisibility === 'private' ? p.is_private : !p.is_private)) &&
+      (p.name.toLowerCase().includes(search.toLowerCase()) ||
+        (p.description?.toLowerCase() || '').includes(search.toLowerCase()) ||
+        (p.technologies || []).some(t => t.toLowerCase().includes(search.toLowerCase())))
     )
 
     result.sort((a, b) => {
@@ -312,7 +348,7 @@ export default function Dashboard({
     })
 
     return result
-  }, [projects, search, sort])
+  }, [projects, repositoryVisibility, search, sort])
 
   return (
     <div className="min-h-screen font-sans">
@@ -361,9 +397,8 @@ export default function Dashboard({
       <main className="mx-auto max-w-7xl px-4 pb-24 sm:px-6">
         <PortfolioBriefingPanel projectCount={projects.length} initial={initialBriefing} />
 
-        {/* Projects toolbar: heading and count, search, sort, sync */}
-        <section id="projects" aria-labelledby="projects-heading" className="mt-10 scroll-mt-20 border-b border-line pb-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <section id="projects" aria-labelledby="projects-heading" className="mt-6 scroll-mt-20 border-b border-line pb-4">
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-baseline gap-3">
               <h2 id="projects-heading" className="label text-foreground">Projects</h2>
               <span className="font-mono text-[11px] text-dim">
@@ -372,68 +407,84 @@ export default function Dashboard({
                   : `${filteredAndSorted.length} / ${projects.length}`}
               </span>
             </div>
+            <div className="flex items-center gap-3">
+              {lastSyncedAt && (
+                <span className="hidden whitespace-nowrap font-mono text-[10px] text-dim sm:inline">Synced {isoDate(lastSyncedAt)}</span>
+              )}
+              <Button
+                onClick={() => handleSync()}
+                disabled={isSyncing}
+                variant="outline"
+                size="sm"
+                aria-label="Sync GitHub"
+                className="eyebrow"
+              >
+                <RefreshCw className={isSyncing ? 'animate-spin' : ''} />
+                {isSyncing ? 'Syncing' : 'Sync'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="relative min-w-0 flex-1">
+              <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none font-mono text-xs text-brand">
+                &gt;
+              </span>
+              <input
+                type="text"
+                aria-label="Search projects and technologies"
+                placeholder="Search projects and technologies"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="field bg-surface py-2 pl-8 pr-3"
+              />
+            </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="relative w-full sm:w-72">
-                <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none font-mono text-xs text-brand">
-                  &gt;
-                </span>
-                <input
-                  type="text"
-                  aria-label="Search projects and technologies"
-                  placeholder="Search projects"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  className="field bg-surface py-2 pl-8 pr-3"
-                />
-              </div>
+              {privateReposConnected && (
+                <div role="group" aria-label="Filter repositories by visibility" className="flex divide-x divide-line border border-line">
+                  {(['all', 'public', 'private'] as const).map(visibility => (
+                    <button
+                      key={visibility}
+                      aria-pressed={repositoryVisibility === visibility}
+                      onClick={() => setRepositoryVisibility(visibility)}
+                      className={`eyebrow flex-1 px-3 py-2 transition-colors sm:flex-none ${
+                        repositoryVisibility === visibility ? 'bg-raised text-brand' : 'text-dim hover:text-foreground'
+                      }`}
+                    >
+                      {visibility[0].toUpperCase() + visibility.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              )}
 
-              <div role="group" aria-label="Sort projects" className="flex divide-x divide-line overflow-x-auto border border-line">
-                {SORTS.map(({ key, label }) => (
-                  <button
-                    key={key}
-                    aria-pressed={sort === key}
-                    onClick={() => setSort(key)}
-                    className={`eyebrow whitespace-nowrap px-3 py-2 transition-colors ${
-                      sort === key ? 'bg-raised text-brand' : 'text-dim hover:text-foreground'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-3 sm:border-l sm:border-line sm:pl-3">
-                <Button
-                  onClick={handleSync}
-                  disabled={isSyncing}
-                  variant="outline"
-                  aria-label="Sync GitHub"
-                  className="eyebrow"
+              <label className="flex items-center gap-2">
+                <span className="eyebrow shrink-0 text-dim">Sort</span>
+                <select
+                  aria-label="Sort projects"
+                  value={sort}
+                  onChange={event => setSort(event.target.value as typeof sort)}
+                  className="field min-w-44 bg-surface px-3 py-2 font-sans text-sm"
                 >
-                  <RefreshCw className={isSyncing ? 'animate-spin' : ''} />
-                  Sync GitHub
-                </Button>
-                {lastSyncedAt && (
-                  <span className="whitespace-nowrap font-mono text-[10px] text-dim">Synced {isoDate(lastSyncedAt)}</span>
-                )}
-              </div>
+                  {SORTS.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
+                </select>
+              </label>
             </div>
           </div>
 
           {syncMessage && (
-            <p role="status" className="mt-3 font-mono text-[11px] text-dim">{syncMessage}</p>
+            <p role="status" className="mt-2 font-mono text-[11px] text-dim">{syncMessage}</p>
           )}
 
           {!privateReposConnected && (
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-3 flex flex-col gap-2 border-l border-brand-dim pl-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="font-mono text-[11px] text-dim">
                 Private repositories are not imported. Grant read access to include them in your private workspace.
               </p>
               <div className="flex items-center gap-3">
                 {connectMessage && <span role="status" className="font-mono text-[11px] text-dim">{connectMessage}</span>}
-                <Button variant="outline" onClick={handleConnectPrivate} className="eyebrow shrink-0">
-                  <Lock className="h-3.5 w-3.5" /> Include private repositories
+                <Button variant="outline" size="sm" onClick={handleConnectPrivate} disabled={connectPending} className="eyebrow shrink-0">
+                  <Lock className="h-3.5 w-3.5" /> {connectPending ? 'Redirecting to GitHub' : 'Include private repositories'}
                 </Button>
               </div>
             </div>
@@ -484,7 +535,7 @@ export default function Dashboard({
                     aria-label={`View ${project.name} on GitHub (opens in new tab)`}
                     target="_blank"
                     rel="noreferrer"
-                    className="p-1 text-dim transition-colors hover:text-foreground"
+                    className="relative z-10 p-1 text-dim transition-colors hover:text-foreground"
                   >
                     <GithubIcon className="h-3.5 w-3.5" />
                   </a>
@@ -496,13 +547,16 @@ export default function Dashboard({
               </div>
 
               <div className="flex flex-grow flex-col px-5 pb-5 pt-2">
+                {/* The stretched pseudo-element makes the card clickable down to
+                    the footer, which stays uncovered so technology tooltips and
+                    the GitHub link remain hoverable. */}
                 <Link
                   href={`/project/${project.id}`}
-                  className="text-lg font-semibold tracking-tight transition-colors hover:text-brand"
+                  className="text-lg font-semibold tracking-tight transition-colors after:absolute after:inset-x-0 after:top-0 after:bottom-14 hover:text-brand"
                 >
                   {project.name}
                 </Link>
-                <p className={`mt-2 text-sm leading-relaxed ${project.description ? 'text-dim' : 'italic text-faint'}`}>
+                <p className={`mt-2 text-sm leading-relaxed ${project.description ? 'text-dim' : 'italic text-dim'}`}>
                   {project.description || 'No description on GitHub.'}
                 </p>
                 {project.brief?.purpose && (
@@ -522,11 +576,14 @@ export default function Dashboard({
               <footer className="mt-auto flex items-center justify-between gap-3 border-t border-line px-5 py-3">
                 {/* Technology metadata is a single labeled group: readable by
                     screen readers without five icon-only focus stops. */}
-                <span aria-label={`Technologies: ${stackTechnologies(project).slice(0, 5).join(', ')}`} className="flex min-w-0 items-center gap-2">
+                <span aria-label={`Technologies: ${stackTechnologies(project).slice(0, 5).join(', ')}`} className="relative z-10 flex min-w-0 items-center gap-2">
                   {stackTechnologies(project).slice(0, 5).map(tech => {
                     const iconClass = deviconFor(tech)
+                    const brand = techBrandMark(tech)
                     return iconClass ? (
-                      <i key={tech} aria-hidden="true" title={tech} className={`${iconClass} text-base text-faint`} />
+                      <i key={tech} aria-hidden="true" title={tech} className={`${iconClass} text-base text-faint transition-colors hover:text-dim`} />
+                    ) : brand ? (
+                      <TechBrandIcon key={tech} technology={tech} aria-hidden="true" title={tech} className="h-4 w-4 text-faint transition-colors hover:text-dim" />
                     ) : (
                       <span
                         key={tech}
@@ -556,7 +613,7 @@ export default function Dashboard({
                   : 'No repositories match your search.'}
               </p>
               {projects.length === 0 && (
-                <Button onClick={handleSync} disabled={isSyncing} className="eyebrow mt-6">
+                <Button onClick={() => handleSync()} disabled={isSyncing} className="eyebrow mt-6">
                   <RefreshCw className={isSyncing ? 'animate-spin' : ''} /> Sync GitHub
                 </Button>
               )}
@@ -564,6 +621,24 @@ export default function Dashboard({
           )}
         </section>}
       </main>
+
+      <footer className="border-t border-line">
+        <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-6 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <span className="eyebrow text-dim">Proofstack v{packageJson.version}</span>
+          <div className="flex items-center gap-4">
+            <Link href="/privacy" className="eyebrow text-dim transition-colors hover:text-foreground">Privacy</Link>
+            <a
+              href="https://github.com/jrudman25/Repfolio"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="View the Proofstack source on GitHub (opens in new tab)"
+              className="eyebrow flex items-center gap-1.5 text-dim transition-colors hover:text-foreground"
+            >
+              <GithubIcon className="h-3.5 w-3.5" /> Source
+            </a>
+          </div>
+        </div>
+      </footer>
 
       <ChatWidget />
     </div>

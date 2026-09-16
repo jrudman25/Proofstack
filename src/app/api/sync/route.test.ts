@@ -105,6 +105,34 @@ it.each([false, true])('reports only confirmed writes when a later batch fails (
   expect(await response.json()).toEqual({ error: 'Service temporarily unavailable', syncedCount: 100, packageJsonCount: 0 })
   expect(io.upsert).toHaveBeenCalledTimes(2)
 })
+it('imports private repositories only through the explicit connect flow', async () => {
+  const privateRepo = { ...repos[0], id: 999, name: 'secret', full_name: 'owner/secret', html_url: 'https://github.com/owner/secret', private: true }
+  vi.mocked(fetch).mockImplementation(async input => {
+    const parsed = new URL(String(input))
+    if (parsed.pathname === '/user') return new Response('{}', { headers: { 'x-oauth-scopes': 'repo, read:user' } })
+    if (parsed.pathname.endsWith('/package.json')) return new Response('', { status: 404 })
+    if (parsed.pathname.endsWith('/contents')) return new Response(JSON.stringify([]))
+    if (parsed.pathname.endsWith('/languages')) return new Response(JSON.stringify({}))
+    const page = Number(parsed.searchParams.get('page'))
+    return new Response(JSON.stringify(page === 1 ? [repos[0], privateRepo] : []))
+  })
+
+  // A plain sync filters private repositories even though the token can see them,
+  // so disconnecting stays disconnected until the owner connects again.
+  const plain = await POST(request())
+  expect(await plain.json()).toMatchObject({ syncedCount: 1 })
+  expect(io.upsert.mock.calls[0][0].every((row: { is_private: boolean }) => !row.is_private)).toBe(true)
+  expect(io.update).toHaveBeenCalledWith(expect.objectContaining({ github_private_scope: false }))
+
+  io.upsert.mockClear()
+
+  const connected = await POST(new Request('https://app.test/api/sync', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectPrivate: true }),
+  }))
+  expect(await connected.json()).toMatchObject({ syncedCount: 2 })
+  expect(io.upsert.mock.calls[0][0].some((row: { is_private: boolean }) => row.is_private)).toBe(true)
+  expect(io.update).toHaveBeenCalledWith(expect.objectContaining({ github_private_scope: true }))
+})
 it('checks profile database errors before writes', async () => {
   io.single.mockResolvedValue({ data: { id: userId }, error: new Error('secret') })
   const response = await POST(request())

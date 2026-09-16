@@ -1,10 +1,18 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import Dashboard from './Dashboard'
 import type { DashboardProject } from '@/types'
 
 const refresh = vi.fn()
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
+
+const io = vi.hoisted(() => ({
+  signInWithOAuth: vi.fn().mockResolvedValue({ data: {}, error: null }),
+  signOut: vi.fn().mockResolvedValue({}),
+}))
+vi.mock('@/utils/supabase/client', () => ({
+  createClient: () => ({ auth: { signInWithOAuth: io.signInWithOAuth, signOut: io.signOut } }),
+}))
 
 const project: DashboardProject = {
   id: 'p1', name: 'Example', full_name: 'owner/Example',
@@ -15,7 +23,7 @@ const project: DashboardProject = {
   brief: null,
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); refresh.mockClear() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); refresh.mockClear(); io.signInWithOAuth.mockClear(); sessionStorage.clear() })
 
 it('names search and GitHub links and exposes selected sorting', () => {
   render(<Dashboard initialProjects={[project]} />)
@@ -23,9 +31,9 @@ it('names search and GitHub links and exposes selected sorting', () => {
   expect(link).toHaveAttribute('href', project.html_url)
   link.focus()
   expect(link).toHaveFocus()
-  expect(screen.getByRole('button', { name: 'Recently Updated' })).toHaveAttribute('aria-pressed', 'true')
-  fireEvent.click(screen.getByRole('button', { name: 'Alphabetical' }))
-  expect(screen.getByRole('button', { name: 'Alphabetical' })).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByRole('combobox', { name: 'Sort projects' })).toHaveValue('updated')
+  fireEvent.change(screen.getByRole('combobox', { name: 'Sort projects' }), { target: { value: 'name' } })
+  expect(screen.getByRole('combobox', { name: 'Sort projects' })).toHaveValue('name')
   fireEvent.change(screen.getByRole('textbox', { name: 'Search projects and technologies' }), { target: { value: 'missing' } })
   expect(screen.getByText('No projects found')).toBeInTheDocument()
 })
@@ -69,7 +77,7 @@ it('marks private repositories and shows owner brief context on cards', () => {
     ...project, is_private: true,
     brief: { purpose: 'Interview prep notes', lifecycle_status: 'active', owner_verified_at: null },
   }]} />)
-  expect(screen.getByText('Private')).toBeInTheDocument()
+  expect(screen.getByText('Private', { selector: 'span' })).toBeInTheDocument()
   expect(screen.getByText('Owner notes')).toBeInTheDocument()
   expect(screen.getByText('Interview prep notes')).toBeInTheDocument()
   expect(screen.getByText('Active')).toBeInTheDocument()
@@ -80,6 +88,66 @@ it('shows the last completed catalog sync and the private-repository connection 
   expect(screen.getByText('Synced 2026-03-04')).toBeInTheDocument()
   expect(screen.getByText(/Private repositories are not imported/)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /Include private repositories/ })).toBeInTheDocument()
+})
+
+it('renders bundled brand marks for technologies without devicon glyphs', () => {
+  const { container } = render(<Dashboard initialProjects={[{ ...project, language: null, technologies: ['TanStack', 'Upstash', 'Neon', 'Gemini', 'HeroUI'] }]} />)
+  for (const tech of ['TanStack', 'Upstash', 'Neon', 'Gemini', 'HeroUI']) {
+    expect(container.querySelector(`svg[title="${tech}"]`)).not.toBeNull()
+  }
+})
+
+it('requests the repo scope through the same allow-listed callback path as sign-in', async () => {
+  render(<Dashboard initialProjects={[project]} privateReposConnected={false} />)
+  fireEvent.click(screen.getByRole('button', { name: /Include private repositories/ }))
+  await waitFor(() => expect(io.signInWithOAuth).toHaveBeenCalledOnce())
+  expect(io.signInWithOAuth).toHaveBeenCalledWith({
+    provider: 'github',
+    options: {
+      redirectTo: `${location.origin}/auth/callback`,
+      scopes: 'repo read:user user:email',
+    },
+  })
+})
+
+it('syncs automatically when returning from the private-repository authorization', async () => {
+  sessionStorage.setItem('proofstack:connect-private', '1')
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ syncedCount: 2 }) })
+  vi.stubGlobal('fetch', fetchMock)
+  render(<Dashboard initialProjects={[project]} />)
+  expect(await screen.findByRole('status')).toHaveTextContent('Synced 2 projects.')
+  expect(fetchMock).toHaveBeenCalledWith('/api/sync', expect.objectContaining({
+    method: 'POST',
+    body: JSON.stringify({ connectPrivate: true }),
+  }))
+  expect(sessionStorage.getItem('proofstack:connect-private')).toBeNull()
+})
+
+it('filters public and private repositories without removing synced data', () => {
+  const privateProject = { ...project, id: 'p2', name: 'Secret', full_name: 'owner/Secret', is_private: true }
+  const fetchMock = vi.fn()
+  vi.stubGlobal('fetch', fetchMock)
+  render(<Dashboard initialProjects={[project, privateProject]} privateReposConnected />)
+
+  expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByRole('link', { name: 'Example' })).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Secret' })).toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Public' }))
+  expect(screen.getByRole('link', { name: 'Example' })).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Secret' })).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Private' }))
+  expect(screen.queryByRole('link', { name: 'Example' })).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Secret' })).toBeInTheDocument()
+  expect(fetchMock).not.toHaveBeenCalled()
+})
+
+it('does not sync automatically without a pending private-repository authorization', () => {
+  const fetchMock = vi.fn()
+  vi.stubGlobal('fetch', fetchMock)
+  render(<Dashboard initialProjects={[project]} />)
+  expect(fetchMock).not.toHaveBeenCalled()
 })
 
 it('keeps the briefing as the only primary action and disables it without projects', () => {
