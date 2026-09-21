@@ -3,7 +3,7 @@ import type { ProjectLifecycleStatus } from '@/types'
 // Columns read by both the chat and briefing evidence pipelines. Private
 // repositories stay in the owner's workspace catalog but are never placed in
 // an AI payload until the owner opts that project in (ai_opt_in).
-export const EVIDENCE_PROJECT_FIELDS = 'id, name, full_name, description, html_url, language, technologies, stargazers_count, pushed_at, github_created_at, is_private, ai_opt_in'
+export const EVIDENCE_PROJECT_FIELDS = 'id, name, full_name, description, html_url, language, technologies, stargazers_count, pushed_at, github_created_at, is_private, ai_opt_in, github_fork, github_owner_login, github_owner_type'
 export const EVIDENCE_BRIEF_FIELDS = 'project_id, lifecycle_status, purpose, inspiration, role_and_contributions, architecture_and_decisions, challenges_and_solutions, outcomes_and_impact, lessons_learned, interview_talking_points, owner_verified_at'
 
 export type EvidenceProjectRow = {
@@ -19,6 +19,9 @@ export type EvidenceProjectRow = {
   github_created_at: string | null
   is_private: boolean
   ai_opt_in: boolean
+  github_fork: boolean
+  github_owner_login: string | null
+  github_owner_type: 'User' | 'Organization' | null
 }
 
 export type EvidenceBriefRow = {
@@ -85,6 +88,13 @@ export function toEvidenceEntry(project: EvidenceProjectRow, brief: EvidenceBrie
       stars: project.stargazers_count,
       lastPushedAt: project.pushed_at,
       createdAt: project.github_created_at,
+      // GitHub-derived relationship, kept separate from the owner's stated
+      // role so the model never infers sole authorship from access.
+      repository: {
+        fork: project.github_fork,
+        ownerLogin: project.github_owner_login,
+        ownerType: project.github_owner_type,
+      },
     },
     ownerContext: brief ? ownerContext(brief) : null,
     evidenceStatus: status,

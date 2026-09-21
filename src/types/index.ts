@@ -13,6 +13,9 @@ export type Project = {
   github_created_at: string | null
   is_private: boolean
   ai_opt_in: boolean
+  github_fork: boolean
+  github_owner_login: string | null
+  github_owner_type: 'User' | 'Organization' | null
   summary: string | null
   technologies: string[]
   has_code_map: boolean
@@ -34,6 +37,7 @@ export type ProjectBrief = {
   outcomes_and_impact: string | null
   lessons_learned: string | null
   interview_talking_points: string | null
+  published_fields: PublishableBriefField[]
   owner_verified_at: string | null
   last_reviewed_at: string | null
   ai_draft: Record<string, unknown>
@@ -67,6 +71,57 @@ export type StoredBriefing = {
   briefing: PortfolioBriefing
   generatedAt: string
   changedCount: number
+}
+
+// The brief fields an owner may publish. interview_talking_points is private
+// interview preparation and is deliberately absent.
+export type PublishableBriefField = 'lifecycle_status' | 'purpose' | 'inspiration'
+  | 'role_and_contributions' | 'architecture_and_decisions' | 'challenges_and_solutions'
+  | 'outcomes_and_impact' | 'lessons_learned'
+
+// The public-safe projection of a stored portfolio briefing, snapshotted at
+// publish time. evidenceGaps and interviewQuestions are owner-preparation
+// sections and are never copied here.
+export type PublicBriefingSnapshot = {
+  summary: string
+  themes: { title: string; detail: string; projectIds: string[] }[]
+  spotlights: { projectId: string; reason: string; talkingPoints: string[] }[]
+  growth: string
+  citations: { projectId: string; name: string; url: string; evidence: ('github' | 'owner')[] }[]
+}
+
+// What the public profile actually returns. Brief fields absent from
+// published_fields are omitted entirely; internal ids, embeddings, AI drafts,
+// and private-repository evidence never leave this boundary.
+export type PublicProfile = {
+  slug: string
+  githubUsername: string
+  avatarUrl: string | null
+  fullName: string | null
+  publishedAt: string | null
+  briefing: {
+    summary: string
+    themes: { title: string; detail: string; projects: { name: string; url: string }[] }[]
+    spotlights: { project: { name: string; url: string }; reason: string; talkingPoints: string[] }[]
+    growth: string
+    citations: { name: string; url: string; evidence: ('github' | 'owner')[] }[]
+    publishedAt: string | null
+  } | null
+  projects: {
+    name: string
+    fullName: string
+    description: string | null
+    url: string
+    homepage: string | null
+    language: string | null
+    technologies: string[]
+    stargazersCount: number
+    pushedAt: string | null
+    githubCreatedAt: string | null
+    repository: { fork: boolean; ownerLogin: string | null; ownerType: 'User' | 'Organization' | null }
+    ownerReviewed: boolean
+    brief: Partial<Record<PublishableBriefField, string | null>>
+  }[]
 }
 
 export type Todo = {

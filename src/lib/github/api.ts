@@ -12,6 +12,7 @@ export type GithubRepo = {
   html_url: string; language: string | null; homepage: string | null
   stargazers_count: number; pushed_at: string | null
   is_private: boolean; github_created_at: string | null
+  github_fork: boolean; github_owner_login: string; github_owner_type: 'User' | 'Organization' | null
 }
 
 function unavailable(): never { throw new ApiError(503, 'GitHub service temporarily unavailable') }
@@ -67,6 +68,15 @@ function parseRepos(value: unknown, limit: number): GithubRepo[] {
     // live API payloads use GitHub's raw names (private/created_at).
     const isPrivate = r.private ?? r.is_private
     const createdAt = r.created_at ?? r.github_created_at
+    // Repository relationship: live payloads carry fork and owner.{login,type};
+    // cached entries hold the parsed storage names. Owner login is always
+    // derivable from full_name; an unrecognized owner type is dropped to null
+    // rather than aborting the import.
+    const fork = r.fork ?? r.github_fork ?? false
+    const owner = (r.owner && typeof r.owner === 'object' && !Array.isArray(r.owner) ? r.owner : {}) as Record<string, unknown>
+    const ownerLogin = owner.login ?? r.github_owner_login ?? (typeof r.full_name === 'string' ? r.full_name.split('/')[0] : undefined)
+    const rawOwnerType = owner.type ?? r.github_owner_type
+    const ownerType = rawOwnerType === 'User' || rawOwnerType === 'Organization' ? rawOwnerType : null
     const nullableText = (v: unknown) => v === null || typeof v === 'string'
     if (!Number.isSafeInteger(r.id) || (r.id as number) < 1
       || typeof r.name !== 'string' || !/^[\w.-]+$/.test(r.name) || r.name === '.' || r.name === '..'
@@ -76,6 +86,8 @@ function parseRepos(value: unknown, limit: number): GithubRepo[] {
       || !(r.pushed_at === null || (typeof r.pushed_at === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(r.pushed_at) && Number.isFinite(Date.parse(r.pushed_at))))
       || !(createdAt === null || (typeof createdAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(createdAt) && Number.isFinite(Date.parse(createdAt))))
       || typeof isPrivate !== 'boolean'
+      || typeof fork !== 'boolean'
+      || typeof ownerLogin !== 'string' || !/^[\w-]+$/.test(ownerLogin)
       || r.html_url !== `https://github.com/${r.full_name}`) unavailable()
     if (r.homepage) {
       try { if (!['https:', 'http:'].includes(new URL(r.homepage as string).protocol)) unavailable() } catch { unavailable() }
@@ -83,7 +95,8 @@ function parseRepos(value: unknown, limit: number): GithubRepo[] {
     return { id: r.id, name: r.name, full_name: r.full_name, description: r.description,
       html_url: r.html_url, language: r.language, homepage: r.homepage,
       stargazers_count: r.stargazers_count, pushed_at: r.pushed_at,
-      is_private: isPrivate, github_created_at: createdAt } as GithubRepo
+      is_private: isPrivate, github_created_at: createdAt,
+      github_fork: fork, github_owner_login: ownerLogin, github_owner_type: ownerType } as GithubRepo
   })
 }
 

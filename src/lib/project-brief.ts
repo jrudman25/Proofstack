@@ -1,7 +1,7 @@
 import { ApiError, objectBody } from './api-validation'
-import type { ProjectBrief, ProjectLifecycleStatus } from '@/types'
+import type { ProjectBrief, ProjectLifecycleStatus, PublishableBriefField } from '@/types'
 
-export const PROJECT_BRIEF_COLUMNS = 'project_id, visibility, lifecycle_status, purpose, inspiration, role_and_contributions, architecture_and_decisions, challenges_and_solutions, outcomes_and_impact, lessons_learned, interview_talking_points, owner_verified_at, last_reviewed_at, ai_draft, ai_draft_generated_at, created_at, updated_at'
+export const PROJECT_BRIEF_COLUMNS = 'project_id, visibility, lifecycle_status, purpose, inspiration, role_and_contributions, architecture_and_decisions, challenges_and_solutions, outcomes_and_impact, lessons_learned, interview_talking_points, published_fields, owner_verified_at, last_reviewed_at, ai_draft, ai_draft_generated_at, created_at, updated_at'
 
 // Shared limits so the editor can enforce the same boundaries the API
 // validates: per-field and total character caps plus the serialized body cap
@@ -21,8 +21,17 @@ const TEXT_FIELDS = [
   'interview_talking_points',
 ] as const
 
+// The fields an owner may publish on a public profile. interview_talking_points
+// is private interview preparation and is deliberately excluded; the database
+// check constraint on project_briefs.published_fields mirrors this list.
+export const PUBLISHABLE_BRIEF_FIELDS = [
+  'lifecycle_status', 'purpose', 'inspiration', 'role_and_contributions',
+  'architecture_and_decisions', 'challenges_and_solutions', 'outcomes_and_impact', 'lessons_learned',
+] as const satisfies readonly PublishableBriefField[]
+
+const PUBLISHABLE_SET = new Set<string>(PUBLISHABLE_BRIEF_FIELDS)
 const LIFECYCLE_STATUSES = new Set<ProjectLifecycleStatus>(['prototype', 'active', 'maintained', 'completed', 'archived'])
-const ALLOWED_FIELDS = new Set<string>(['visibility', 'lifecycleStatus', 'ownerVerified', 'baseUpdatedAt', ...TEXT_FIELDS])
+const ALLOWED_FIELDS = new Set<string>(['visibility', 'lifecycleStatus', 'ownerVerified', 'baseUpdatedAt', 'publishedFields', ...TEXT_FIELDS])
 
 export type ProjectBriefUpdate = Pick<ProjectBrief,
   | 'visibility'
@@ -35,7 +44,7 @@ export type ProjectBriefUpdate = Pick<ProjectBrief,
   | 'outcomes_and_impact'
   | 'lessons_learned'
   | 'interview_talking_points'
-> & { ownerVerified: boolean; baseUpdatedAt: string | null }
+> & { ownerVerified: boolean; baseUpdatedAt: string | null; published_fields?: PublishableBriefField[] }
 
 export function parseProjectBriefBody(value: unknown): ProjectBriefUpdate {
   const body = objectBody(value)
@@ -45,6 +54,14 @@ export function parseProjectBriefBody(value: unknown): ProjectBriefUpdate {
     throw new ApiError(400, 'Invalid project brief')
   }
   if (typeof body.ownerVerified !== 'boolean') throw new ApiError(400, 'Invalid project brief')
+  // publishedFields is optional: an omitted key preserves the stored selection
+  // so older editors never wipe the owner's publication choices on save.
+  if (body.publishedFields !== undefined
+    && (!Array.isArray(body.publishedFields) || body.publishedFields.length > PUBLISHABLE_BRIEF_FIELDS.length
+      || new Set(body.publishedFields).size !== body.publishedFields.length
+      || body.publishedFields.some(field => typeof field !== 'string' || !PUBLISHABLE_SET.has(field)))) {
+    throw new ApiError(400, 'Invalid project brief')
+  }
   // baseUpdatedAt is the optimistic-concurrency precondition: the client sends
   // the updated_at of the brief it edited, or null when no brief exists yet.
   if (body.baseUpdatedAt !== undefined && body.baseUpdatedAt !== null
@@ -66,6 +83,7 @@ export function parseProjectBriefBody(value: unknown): ProjectBriefUpdate {
     lifecycle_status: body.lifecycleStatus as ProjectLifecycleStatus | null,
     ownerVerified: body.ownerVerified,
     baseUpdatedAt: (body.baseUpdatedAt as string | null | undefined) ?? null,
+    ...(body.publishedFields === undefined ? {} : { published_fields: body.publishedFields as PublishableBriefField[] }),
     purpose: text.purpose,
     inspiration: text.inspiration,
     role_and_contributions: text.role_and_contributions,
