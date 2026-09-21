@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { ProjectBrief, ProjectLifecycleStatus } from '@/types'
+import type { ProjectBrief, ProjectLifecycleStatus, PublishableBriefField } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Check, Pencil, Save } from 'lucide-react'
-import { BRIEF_BODY_BYTES, BRIEF_FIELD_LIMIT, BRIEF_TOTAL_LIMIT } from '@/lib/project-brief'
+import { BRIEF_BODY_BYTES, BRIEF_FIELD_LIMIT, BRIEF_TOTAL_LIMIT, PUBLISHABLE_BRIEF_FIELDS } from '@/lib/project-brief'
 import { clientErrorMessage } from '@/lib/client-error-message'
 
 const NARRATIVE_FIELDS = [
@@ -23,13 +23,23 @@ type BriefForm = Record<NarrativeKey, string> & {
   visibility: 'private' | 'public'
   lifecycleStatus: ProjectLifecycleStatus | ''
   ownerVerified: boolean
+  publishedFields: PublishableBriefField[]
 }
+
+// Every publishable field with its display label. interview_talking_points is
+// never offered: it is private interview preparation.
+const PUBLISHABLE_OPTIONS: { key: PublishableBriefField; label: string }[] = [
+  { key: 'lifecycle_status', label: 'Lifecycle status' },
+  ...NARRATIVE_FIELDS.filter(({ key }) => PUBLISHABLE_BRIEF_FIELDS.includes(key as PublishableBriefField))
+    .map(({ key, label }) => ({ key: key as PublishableBriefField, label })),
+]
 
 function initialForm(brief?: ProjectBrief | null): BriefForm {
   return {
     visibility: brief?.visibility ?? 'private',
     lifecycleStatus: brief?.lifecycle_status ?? '',
     ownerVerified: Boolean(brief?.owner_verified_at),
+    publishedFields: brief?.published_fields ?? [],
     purpose: brief?.purpose ?? '',
     inspiration: brief?.inspiration ?? '',
     role_and_contributions: brief?.role_and_contributions ?? '',
@@ -148,6 +158,12 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
   }
 
   const set = (key: NarrativeKey, value: string) => setForm(current => ({ ...current, [key]: value }))
+  const togglePublished = (field: PublishableBriefField) => setForm(current => ({
+    ...current,
+    publishedFields: current.publishedFields.includes(field)
+      ? current.publishedFields.filter(item => item !== field)
+      : [...current.publishedFields, field],
+  }))
 
   const reviewedBadge = (
     <div className="eyebrow text-dim">
@@ -295,8 +311,30 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
                   <option value="private">Private workspace</option>
                   <option value="public">Selected for future public profile</option>
                 </select>
-                <span className="block text-xs leading-relaxed text-dim">Selecting public does not publish anything yet.</span>
+                <span className="block text-xs leading-relaxed text-dim">Appears on your public profile only while the profile itself is published from Account.</span>
               </label>
+
+              {form.visibility === 'public' && (
+                <fieldset className="space-y-3 md:col-span-2">
+                  <legend className="eyebrow text-dim">Fields on your public profile</legend>
+                  <p className="text-xs leading-relaxed text-dim">
+                    Checked fields appear publicly. Interview talking points stay private and are never publishable.
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {PUBLISHABLE_OPTIONS.map(({ key, label }) => (
+                      <label key={key} className="flex cursor-pointer items-center gap-2.5 text-sm text-foreground/90">
+                        <input
+                          type="checkbox"
+                          checked={form.publishedFields.includes(key)}
+                          onChange={() => togglePublished(key)}
+                          className="h-4 w-4 accent-[var(--color-brand)]"
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
             </div>
           </details>
 

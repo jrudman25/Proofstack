@@ -1,18 +1,69 @@
 'use client'
 
 import { useState } from 'react'
-import { ArrowLeft, LogOut, Trash2 } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Globe, LogOut, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/utils/supabase/client'
+import { clientErrorMessage } from '@/lib/client-error-message'
 
-export default function AccountClient({ email }: { email: string | null }) {
+type Publication = {
+  slug: string | null
+  published: boolean
+  briefingPublishedAt: string | null
+  hasBriefing: boolean
+}
+
+type ProfileResponse = {
+  public_slug: string | null
+  profile_published: boolean
+  profile_published_at: string | null
+  public_briefing_published_at: string | null
+}
+
+export default function AccountClient({ email, publication }: { email: string | null; publication: Publication }) {
   const router = useRouter()
   const [confirming, setConfirming] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [message, setMessage] = useState('')
+  const [slug, setSlug] = useState(publication.slug ?? '')
+  const [profile, setProfile] = useState(publication)
+  const [isSaving, setIsSaving] = useState(false)
+  const [profileMessage, setProfileMessage] = useState('')
+
+  const patchProfile = async (body: Record<string, unknown>, fallback: string) => {
+    setIsSaving(true)
+    setProfileMessage('')
+    try {
+      const res = await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const result = await res.json()
+      if (!res.ok) {
+        setProfileMessage(clientErrorMessage(res, result, fallback))
+        return
+      }
+      const saved = result.profile as ProfileResponse
+      setProfile(current => ({
+        ...current,
+        slug: saved.public_slug,
+        published: saved.profile_published,
+        briefingPublishedAt: saved.public_briefing_published_at ?? current.briefingPublishedAt,
+      }))
+      if (saved.public_slug) setSlug(saved.public_slug)
+      setProfileMessage('Saved.')
+    } catch {
+      setProfileMessage(fallback)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const publicUrl = profile.slug && profile.published ? `/u/${profile.slug}` : null
 
   const handleSignOut = async () => {
     const supabase = createClient()
@@ -58,6 +109,68 @@ export default function AccountClient({ email }: { email: string | null }) {
 
         <h1 className="text-2xl font-semibold tracking-tight">Account</h1>
         {email && <p className="font-mono text-[11px] text-dim">{email}</p>}
+
+        <section className="corner-ticks relative border border-line bg-surface px-6 py-5">
+          <h2 className="label text-dim">Public profile</h2>
+          <p className="mt-1 max-w-xl text-sm leading-relaxed text-dim">
+            Publish a curated view of your portfolio. Only projects selected in their brief and the fields you checked appear publicly; private repositories are never shown.
+          </p>
+
+          <div className="mt-4 space-y-4">
+            <label className="block space-y-2">
+              <span className="eyebrow text-dim">Profile URL</span>
+              <span className="flex items-center gap-0">
+                <span className="border border-r-0 border-line bg-ink px-3 py-2 font-mono text-[11px] text-dim">/u/</span>
+                <input
+                  aria-label="Profile URL slug"
+                  value={slug}
+                  onChange={event => setSlug(event.target.value)}
+                  placeholder="your-github-username"
+                  className="field w-full max-w-xs px-3 py-2 font-mono text-[13px]"
+                />
+              </span>
+            </label>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="outline" disabled={isSaving} onClick={() => patchProfile({ slug }, 'Unable to save the profile URL.')} className="eyebrow">
+                Save URL
+              </Button>
+              <Button
+                variant={profile.published ? 'outline' : 'default'}
+                disabled={isSaving}
+                onClick={() => patchProfile({ published: !profile.published }, 'Unable to update publication.')}
+                className="eyebrow"
+              >
+                <Globe className="h-3.5 w-3.5" /> {profile.published ? 'Unpublish profile' : 'Publish profile'}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={isSaving || !profile.hasBriefing}
+                onClick={() => patchProfile({ publishBriefing: true }, 'Unable to publish the briefing.')}
+                className="eyebrow"
+                title={profile.hasBriefing ? 'Copy the current portfolio briefing to your public profile' : 'Generate a portfolio briefing first'}
+              >
+                Publish latest briefing
+              </Button>
+            </div>
+
+            <div className="space-y-1 font-mono text-[11px] text-dim">
+              {publicUrl && (
+                <p>
+                  Live at{' '}
+                  <Link href={publicUrl} className="text-brand underline-offset-2 hover:underline">
+                    {publicUrl}
+                  </Link>{' '}
+                  <ExternalLink className="inline h-3 w-3" />
+                </p>
+              )}
+              {profile.briefingPublishedAt && (
+                <p>Briefing snapshot published {new Date(profile.briefingPublishedAt).toISOString().slice(0, 10)}. Regenerating your briefing does not change the public copy.</p>
+              )}
+              {profileMessage && <p role="status">{profileMessage}</p>}
+            </div>
+          </div>
+        </section>
 
         <section className="corner-ticks relative border border-line bg-surface px-6 py-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

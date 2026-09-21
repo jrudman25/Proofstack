@@ -16,6 +16,7 @@ const savedBrief: ProjectBrief = {
   outcomes_and_impact: null,
   lessons_learned: null,
   interview_talking_points: null,
+  published_fields: [],
   owner_verified_at: '2026-09-12T00:00:00.000Z',
   last_reviewed_at: '2026-09-12T00:00:00.000Z',
   ai_draft: {},

@@ -19,6 +19,7 @@ const project: DashboardProject = {
   description: 'Example repository', html_url: 'https://github.com/owner/Example', language: 'TypeScript',
   homepage: null, stargazers_count: 1, pushed_at: null, technologies: ['MongoDB', 'Next.js'],
   is_private: false, ai_opt_in: false, github_created_at: '2025-01-01T00:00:00.000Z',
+  github_fork: false, github_owner_login: 'owner', github_owner_type: 'User',
   created_at: '2026-01-01', updated_at: '2026-03-04T10:00:00.000Z',
   brief: null,
 }
