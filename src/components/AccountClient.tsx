@@ -3,11 +3,13 @@
 import { useState } from 'react'
 import { ArrowLeft, LogOut, Trash2 } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/utils/supabase/client'
 
 export default function AccountClient({ email }: { email: string | null }) {
+  const router = useRouter()
   const [confirming, setConfirming] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [message, setMessage] = useState('')
@@ -15,7 +17,7 @@ export default function AccountClient({ email }: { email: string | null }) {
   const handleSignOut = async () => {
     const supabase = createClient()
     await supabase.auth.signOut()
-    window.location.href = '/login'
+    router.replace('/login')
   }
 
   const handleDelete = async () => {
@@ -29,7 +31,7 @@ export default function AccountClient({ email }: { email: string | null }) {
       }
       const supabase = createClient()
       await supabase.auth.signOut()
-      window.location.href = '/login'
+      router.replace('/login')
     } catch {
       setMessage('Unable to delete your account. Please try again.')
     } finally {

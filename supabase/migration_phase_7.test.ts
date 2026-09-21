@@ -9,6 +9,7 @@ const projectBriefsMigration = sql('migrations/20260912000000_project_briefs.sql
 const phase1Migration = sql('migrations/20260914000000_phase1_portfolio.sql')
 const definerMigration = sql('migrations/20260914000001_restrict_definer_functions.sql')
 const vectorMigration = sql('migrations/20260914000002_move_vector_extension.sql')
+const consentSerializationMigration = sql('migrations/20260916000000_serialize_ai_consent_embeddings.sql')
 const setup = sql('setup.sql')
 const functions = sql('functions.sql')
 
@@ -62,6 +63,23 @@ it('adds private-repository consent, GitHub provenance and persisted briefings w
   expect(phase1Migration).toContain('add column if not exists')
   expect(phase1Migration).toContain('create table if not exists')
   expect(phase1Migration).toContain('if not exists (select 1 from pg_policies')
+})
+it('serializes embedding writes with private AI consent changes', () => {
+  for (const text of [functions, consentSerializationMigration]) {
+    expect(text).toContain('enforce_project_embedding_ai_consent')
+    expect(text).toContain('delete_project_embeddings_on_ai_revoke')
+    expect(text).toMatch(/where p\.id = new\.project_id\s+for update/)
+    expect(text).toContain('project_private and not project_ai_opt_in')
+    expect(text).toMatch(/before insert or update on public\.project_embeddings/)
+    expect(text).toMatch(/after update of is_private, ai_opt_in on public\.projects/)
+    expect(text).toMatch(/delete from public\.project_embeddings\s+where project_id = new\.id/)
+    expect(text).toContain('old.ai_opt_in is distinct from new.ai_opt_in')
+    expect(text).toContain('security invoker')
+    expect(text).not.toContain('security definer')
+    expect(text).toContain('revoke all on function public.enforce_project_embedding_ai_consent() from public, anon, authenticated')
+    expect(text).toContain('revoke all on function public.delete_project_embeddings_on_ai_revoke() from public, anon, authenticated')
+  }
+  expect(consentSerializationMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
 })
 it('revokes browser-role execution from security definer functions', () => {
   expect(definerMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)

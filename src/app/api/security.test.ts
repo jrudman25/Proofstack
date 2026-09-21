@@ -281,6 +281,15 @@ it('refuses to index a private repository without AI consent', async () => {
   expect(response.status).toBe(403)
   expect(io.embed).not.toHaveBeenCalled()
 })
+it('fails indexing when the database rejects an embedding after consent changes in flight', async () => {
+  const upsert = vi.fn().mockResolvedValue({ error: new Error('AI consent required') })
+  io.from.mockImplementation((table: string) => table === 'projects'
+    ? { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: async () => ({ data: { ...project, user_id: userId, is_private: true, ai_opt_in: true }, error: null }) }
+    : { upsert })
+  const response = await indexProject(request(), projectContext)
+  expect(response.status).toBe(503)
+  expect(upsert).toHaveBeenCalled()
+})
 it('reports a missing README without writing embeddings', async () => {
   const upsert = vi.fn()
   io.get.mockResolvedValue({ found: false })
@@ -290,24 +299,28 @@ it('reports a missing README without writing embeddings', async () => {
   expect(await response.json()).toEqual({ indexed: false, reason: 'no-readme' })
   expect(upsert).not.toHaveBeenCalled()
 })
-it('grants and revokes per-project AI consent, deleting embeddings on revocation', async () => {
+it('grants and revokes per-project AI consent through the trigger-backed project update', async () => {
   const eq = vi.fn().mockReturnThis()
-  const update = vi.fn().mockReturnThis()
-  const del = vi.fn().mockReturnThis()
-  const ownerEq = vi.fn().mockResolvedValue({ error: null })
-  const projectEq = vi.fn().mockResolvedValue({ error: null })
-  eq.mockImplementation((field: string) => field === 'id' ? { eq: ownerEq } : { eq: projectEq })
-  update.mockReturnValue({ eq })
-  del.mockReturnValue({ eq: projectEq })
-  io.from.mockImplementation((table: string) => table === 'projects'
-    ? { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), update, maybeSingle: async () => ({ data: { ...project, user_id: userId, is_private: true, ai_opt_in: false }, error: null }) }
-    : { delete: del })
+  const update = vi.fn().mockReturnValue({ eq })
+  eq.mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) })
+  io.from.mockImplementation((table: string) => {
+    expect(table).toBe('projects')
+    return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), update, maybeSingle: async () => ({ data: { ...project, user_id: userId, is_private: true, ai_opt_in: false }, error: null }) }
+  })
   const grant = await updateProject(request({ aiOptIn: true }), projectContext)
   expect(grant.status).toBe(200)
   expect(update).toHaveBeenCalledWith({ ai_opt_in: true })
   const revoke = await updateProject(request({ aiOptIn: false }), projectContext)
   expect(revoke.status).toBe(200)
-  expect(del).toHaveBeenCalled()
+  expect(update).toHaveBeenCalledWith({ ai_opt_in: false })
+})
+it('does not report revocation success when the transactional project update fails', async () => {
+  const finalEq = vi.fn().mockResolvedValue({ error: new Error('private database detail') })
+  const update = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ eq: finalEq }) })
+  io.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), update, maybeSingle: async () => ({ data: { ...project, user_id: userId, is_private: true, ai_opt_in: true }, error: null }) })
+  const response = await updateProject(request({ aiOptIn: false }), projectContext)
+  expect(response.status).toBe(503)
+  expect(await response.text()).not.toContain('private database detail')
 })
 it('rejects AI consent changes on public repositories', async () => {
   io.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: async () => ({ data: { ...project, user_id: userId, is_private: false }, error: null }) })

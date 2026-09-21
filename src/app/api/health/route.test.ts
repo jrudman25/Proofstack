@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { GET } from './route'
-import { middleware } from '@/middleware'
+import { proxy } from '@/proxy'
 
 afterEach(() => vi.unstubAllEnvs())
 
@@ -14,7 +14,7 @@ it('returns uncached liveness without credentials, dependencies, or redirects', 
   expect(response.headers.get('cache-control')).toBe('no-store')
   expect(response.headers.get('location')).toBeNull()
   expect(await response.json()).toEqual({ status: 'ok' })
-  const result = await middleware(new NextRequest('https://app.example.com/api/health'))
+  const result = await proxy(new NextRequest('https://app.example.com/api/health'))
   expect(result.headers.get('location')).toBeNull()
   expect(result.headers.get('x-middleware-next')).toBe('1')
 })

@@ -25,12 +25,6 @@ export async function PATCH(request: Request, context: RouteContext) {
       .eq('id', projectId).eq('user_id', auth.userId)
     if (error) throw new ApiError(503, 'Service temporarily unavailable')
 
-    if (!body.aiOptIn) {
-      const { error: deleteError } = await auth.supabase.from('project_embeddings')
-        .delete().eq('project_id', projectId)
-      if (deleteError) throw new ApiError(503, 'Service temporarily unavailable')
-    }
-
     return NextResponse.json({ aiOptIn: body.aiOptIn })
   } catch (error) {
     return apiErrorResponse(error)

@@ -26,7 +26,7 @@ Initial repository evidence includes GitHub metadata, READMEs, root manifests, a
 ## Privacy and publication
 
 - Private-repository processing must require explicit opt-in and disclose what content is sent to an AI provider.
-- The per-project `ai_opt_in` flag is the consent gate: every AI payload path (chat, briefing, README indexing) must filter or refuse non-consented private projects, and revocation deletes stored embeddings.
+- The per-project `ai_opt_in` flag is the consent gate: every AI payload path (chat, briefing, README indexing) must filter or refuse non-consented private projects. Database triggers lock the project row before embedding writes and delete embeddings in the same transaction as revocation; do not bypass or weaken this invariant.
 - GitHub sign-in requests `public_repo read:user user:email` only; the broader `repo` scope is requested solely through the explicit "Include private repositories" re-authorization. Do not widen default scopes.
 - Raw private-repository evidence must never enter a public response.
 - Publishing a sanitized description of private work requires explicit owner review.
@@ -49,7 +49,7 @@ Legacy task, milestone, summary-processing, and code-map structures require safe
 
 ## Current architecture
 
-- Next.js 15 and React 19
+- Next.js 16.3.4 and React 19
 - Supabase Auth, PostgreSQL, RLS, and pgvector
 - GitHub OAuth and repository APIs
 - Gemini generation and embeddings through `@google/genai`

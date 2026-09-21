@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useEffectEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { DashboardProject, StoredBriefing } from '@/types'
 import { RefreshCw, Star, LogOut, Lock, Settings } from 'lucide-react'
@@ -288,12 +288,11 @@ export default function Dashboard({
 
   // Resuming a sync after the OAuth round-trip makes the re-authorization
   // visible: private repositories are imported and the banner clears.
-  const syncRef = useRef(handleSync)
-  syncRef.current = handleSync
+  const resumePrivateSync = useEffectEvent(() => handleSync(true))
   useEffect(() => {
     if (sessionStorage.getItem(CONNECT_PRIVATE_PENDING)) {
       sessionStorage.removeItem(CONNECT_PRIVATE_PENDING)
-      void syncRef.current(true)
+      queueMicrotask(() => void resumePrivateSync())
     }
   }, [])
 
@@ -325,7 +324,7 @@ export default function Dashboard({
   const handleSignOut = async () => {
     const supabase = createClient()
     await supabase.auth.signOut()
-    window.location.href = '/login'
+    router.replace('/login')
   }
 
   const filteredAndSorted = useMemo(() => {
