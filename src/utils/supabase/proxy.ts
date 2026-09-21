@@ -3,7 +3,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getServerSupabaseEnv } from '@/lib/env-server'
 
 export async function updateSession(request: NextRequest) {
-  if (request.nextUrl.pathname === '/api' || request.nextUrl.pathname.startsWith('/api/')) {
+  if (request.nextUrl.pathname === '/api' || request.nextUrl.pathname.startsWith('/api/')
+    || request.nextUrl.pathname === '/u' || request.nextUrl.pathname.startsWith('/u/')) {
+    // Public routes: published profiles render through the service-side
+    // retrieval boundary and need no session work on the way in.
     return NextResponse.next({ request })
   }
 

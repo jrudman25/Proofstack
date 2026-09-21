@@ -13,8 +13,15 @@ create table profiles (
   full_name text,
   last_catalog_sync_at timestamp with time zone,
   github_private_scope boolean default false not null,
+  public_slug text check (public_slug is null or public_slug ~ '^[a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?$'),
+  profile_published boolean default false not null,
+  profile_published_at timestamp with time zone,
+  public_briefing jsonb,
+  public_briefing_published_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+create unique index profiles_public_slug_key on profiles (lower(public_slug)) where public_slug is not null;
 
 create table github_credentials (
   user_id uuid references auth.users on delete cascade primary key,
@@ -38,6 +45,9 @@ create table projects (
   github_created_at timestamp with time zone,
   is_private boolean default false not null,
   ai_opt_in boolean default false not null,
+  github_fork boolean default false not null,
+  github_owner_login text,
+  github_owner_type text check (github_owner_type is null or github_owner_type in ('User', 'Organization')),
   summary text,
   technologies text[] default '{}',
   has_code_map boolean default false,
@@ -58,6 +68,10 @@ create table project_briefs (
   outcomes_and_impact text,
   lessons_learned text,
   interview_talking_points text,
+  published_fields text[] default '{}'::text[] not null check (published_fields <@ array[
+    'lifecycle_status', 'purpose', 'inspiration', 'role_and_contributions',
+    'architecture_and_decisions', 'challenges_and_solutions', 'outcomes_and_impact', 'lessons_learned'
+  ]::text[]),
   owner_verified_at timestamp with time zone,
   last_reviewed_at timestamp with time zone,
   ai_draft jsonb default '{}'::jsonb not null,
@@ -203,12 +217,13 @@ create policy "Users can delete own project embeddings" on project_embeddings fo
 create or replace function public.handle_new_user() 
 returns trigger as $$
 begin
-  insert into public.profiles (id, github_username, avatar_url, full_name)
+  insert into public.profiles (id, github_username, avatar_url, full_name, public_slug)
   values (
     new.id,
     new.raw_user_meta_data->>'user_name',
     new.raw_user_meta_data->>'avatar_url',
-    new.raw_user_meta_data->>'full_name'
+    new.raw_user_meta_data->>'full_name',
+    lower(new.raw_user_meta_data->>'user_name')
   );
   return new;
 end;

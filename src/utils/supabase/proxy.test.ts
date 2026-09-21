@@ -26,3 +26,8 @@ it('allows a verified user', async () => {
 it.each(['/login', '/auth/callback', '/auth/auth-code-error', '/privacy'])('allows public path %s', async path => {
   expect((await updateSession(new NextRequest(`https://app.test${path}`))).headers.get('location')).toBeNull()
 })
+it.each(['/u/octocat', '/u/a-1'])('serves public profile %s without session work', async path => {
+  const response = await updateSession(new NextRequest(`https://app.test${path}`))
+  expect(response.headers.get('location')).toBeNull()
+  expect(io.create).not.toHaveBeenCalled()
+})

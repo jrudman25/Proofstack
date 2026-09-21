@@ -10,6 +10,7 @@ const phase1Migration = sql('migrations/20260914000000_phase1_portfolio.sql')
 const definerMigration = sql('migrations/20260914000001_restrict_definer_functions.sql')
 const vectorMigration = sql('migrations/20260914000002_move_vector_extension.sql')
 const consentSerializationMigration = sql('migrations/20260916000000_serialize_ai_consent_embeddings.sql')
+const publicProfilesMigration = sql('migrations/20260920000000_public_profiles.sql')
 const setup = sql('setup.sql')
 const functions = sql('functions.sql')
 
@@ -81,6 +82,31 @@ it('serializes embedding writes with private AI consent changes', () => {
   }
   expect(consentSerializationMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
 })
+it('adds public-profile publication state, field controls and repository relationship without weakening RLS', () => {
+  for (const text of [setup, publicProfilesMigration]) {
+    expect(text).toContain('public_slug')
+    expect(text).toMatch(/profile_published boolean (?:not null default false|default false not null)/)
+    expect(text).toContain('public_briefing jsonb')
+    expect(text).toContain('published_fields')
+    expect(text).toContain('github_fork')
+    expect(text).toContain('github_owner_login')
+    expect(text).toContain('github_owner_type')
+    // interview_talking_points is private interview preparation and can
+    // never appear in the publishable-field allowlist.
+    expect(text).not.toMatch(/published_fields <@ array\[[\s\S]*interview_talking_points/)
+    // The public boundary reads through policies and the server client only:
+    // no anonymous access is granted to profile or project rows.
+    expect(text).not.toMatch(/create policy[\s\S]*?(?:to anon|using \(true\))/)
+  }
+  expect(publicProfilesMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
+  expect(publicProfilesMigration).not.toMatch(/\bdelete\s+from\b|\btruncate\b|\bdrop\s+table\b|\bdisable\s+row\s+level\s+security\b|\bdrop\s+policy\b|\bdrop\s+column\b/)
+  expect(publicProfilesMigration).toContain('add column if not exists')
+  expect(publicProfilesMigration).toContain('lower(github_username)')
+  expect(publicProfilesMigration).toContain('lower(new.raw_user_meta_data')
+  // Slug backfill precedes the format check so legacy rows cannot violate it.
+  expect(publicProfilesMigration.indexOf('set public_slug = lower(github_username)')).toBeLessThan(publicProfilesMigration.indexOf('profiles_public_slug_format'))
+})
+
 it('revokes browser-role execution from security definer functions', () => {
   expect(definerMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
   expect(definerMigration).toContain('revoke all on function public.handle_new_user() from public, anon, authenticated')
