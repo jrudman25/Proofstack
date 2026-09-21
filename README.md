@@ -39,8 +39,9 @@ The application currently provides the private foundation of this direction:
 - Owner-editable project briefs with lifecycle and future portfolio-visibility settings; guided context for purpose, inspiration, contributions, architecture, challenges, impact, lessons, and interview talking points; and an explicit owner-review state. A brief with content opens as readable sections with an explicit Edit mode; empty briefs start with a few guided fields. Brief writes use an authenticated, ownership-checked API with tenant-isolated RLS and an optimistic `updated_at` precondition that rejects stale writes.
 - On-demand portfolio interview briefings covering recurring themes, project spotlights, growth, evidence gaps, and practice questions. Briefings persist per user with the generated time and the repository snapshot they were built from, so the dashboard reloads the latest briefing and reports how many repositories changed since. Output requires schema-validated model output, rejects fabricated project references, and attaches citations that distinguish GitHub metadata from owner notes and link into the internal project workspace.
 - A privacy disclosure page (`/privacy`), an account page (`/account`), and authenticated account deletion through `DELETE /api/account`, which removes the Auth user and cascades to all tenant data including the stored GitHub credential.
+- Owner-curated public profiles at `/u/[slug]`. The owner chooses a stable profile URL, selects which projects appear (brief visibility), and checks which brief fields are published per project; interview talking points are never publishable. The public page leads with a published snapshot of the portfolio briefing, so regenerating the private briefing never silently changes public content. Repository relationship (fork, organization-owned) is displayed separately from the owner's stated role and contributions. Private repositories are excluded unconditionally. All public data exits through one server-only retrieval boundary (`src/lib/public-profile.ts`) that returns only approved fields.
 
-AI project-brief drafts, public profiles, anonymous profile analysis, and publication flows remain planned work. Selecting future public-profile visibility does not currently publish a brief. The codebase still contains legacy task, milestone, and code-map structures and the `projects.summary` column, which are not part of the future product direction and require deliberate deprecation rather than destructive removal.
+AI project-brief drafts, public profile chat, and anonymous profile analysis remain planned work. The codebase still contains legacy task, milestone, and code-map structures and the `projects.summary` column, which are not part of the future product direction and require deliberate deprecation rather than destructive removal.
 
 ## Requirements
 
@@ -64,7 +65,7 @@ Set every variable in `.env.local.example` before running the server:
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser-safe Supabase anonymous/publishable client key |
 | `NEXT_PUBLIC_APP_URL` | Canonical application origin; HTTPS in production, without credentials, path, query, or fragment |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only privileged key used by the signed webhook |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only privileged key used by the signed webhook and the public-profile retrieval boundary |
 | `GITHUB_WEBHOOK_SECRET` | Shared webhook HMAC secret; mandatory |
 | `GITHUB_TOKEN_ENCRYPTION_KEY` | Server-only canonical base64 encoding of 32 random bytes used for AES-256-GCM |
 | `CRON_SECRET` | Server-only random bearer secret of at least 32 characters for maintenance requests |
