@@ -29,6 +29,7 @@ const project = {
   id: projectId, name: 'LivePulse', full_name: 'owner/LivePulse', description: 'Realtime monitoring',
   language: 'Go', technologies: ['Go'], stargazers_count: 2, pushed_at: '2026-09-01T00:00:00Z',
   github_created_at: '2025-01-01T00:00:00Z', is_private: false, ai_opt_in: false,
+  github_fork: false, github_owner_login: 'owner', github_owner_type: 'User',
 }
 function request(body: unknown = { messages, projectId }) {
   return new Request('https://app.test/api', { method: 'POST', body: JSON.stringify(body) })
@@ -134,7 +135,7 @@ it('returns chat with context restricted to the verified user and selected proje
     untrustedProjectContext: {
       projectCatalog: [{
         projectId,
-        github: { name: 'LivePulse', fullName: 'owner/LivePulse', description: 'Realtime monitoring', primaryLanguage: 'Go', technologies: ['Go'], stars: 2, lastPushedAt: '2026-09-01T00:00:00Z', createdAt: '2025-01-01T00:00:00Z' },
+        github: { name: 'LivePulse', fullName: 'owner/LivePulse', description: 'Realtime monitoring', primaryLanguage: 'Go', technologies: ['Go'], stars: 2, lastPushedAt: '2026-09-01T00:00:00Z', createdAt: '2025-01-01T00:00:00Z', repository: { fork: false, ownerLogin: 'owner', ownerType: 'User' } },
         ownerContext: null,
         evidenceStatus: 'metadata-only',
       }],

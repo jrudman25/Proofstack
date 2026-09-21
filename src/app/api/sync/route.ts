@@ -148,6 +148,9 @@ export async function POST(request: Request) {
         pushed_at: repo.pushed_at,
         github_created_at: repo.github_created_at,
         is_private: repo.is_private,
+        github_fork: repo.github_fork,
+        github_owner_login: repo.github_owner_login,
+        github_owner_type: repo.github_owner_type,
         technologies: repo.technologies,
         updated_at: new Date().toISOString(),
       })), {
