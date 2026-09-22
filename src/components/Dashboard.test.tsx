@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import Dashboard from './Dashboard'
 import type { DashboardProject } from '@/types'
@@ -151,23 +151,26 @@ it('does not sync automatically without a pending private-repository authorizati
   expect(fetchMock).not.toHaveBeenCalled()
 })
 
-it('keeps the briefing as the only primary action and disables it without projects', () => {
+it('gives an empty portfolio one guided first-run action', () => {
   render(<Dashboard initialProjects={[]} />)
-  expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeDisabled()
-  expect(screen.getAllByRole('button', { name: 'Sync GitHub' }).length).toBeGreaterThan(0)
-  expect(screen.getByText(/Sync your GitHub account/)).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Build your first interview briefing' })).toBeInTheDocument()
+  expect(screen.getByText('Sync repositories')).toBeInTheDocument()
+  expect(screen.getByText('Add your context')).toBeInTheDocument()
+  expect(screen.getByText('Prepare a briefing')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Import from GitHub' })).toBeEnabled()
+  expect(screen.queryByRole('button', { name: 'Prepare briefing' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('textbox', { name: 'Search projects and technologies' })).not.toBeInTheDocument()
 })
 
-it('reflects refreshed server projects and briefing eligibility without losing search', () => {
+it('shows the briefing and project tools after repositories are imported', () => {
   const { rerender } = render(<Dashboard initialProjects={[]} />)
-  expect(screen.getByText(/Sync your GitHub account/)).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeDisabled()
-  fireEvent.change(screen.getByRole('textbox', { name: 'Search projects and technologies' }), { target: { value: 'Example' } })
+  expect(screen.getByRole('heading', { name: 'Build your first interview briefing' })).toBeInTheDocument()
   rerender(<Dashboard initialProjects={[project]} lastSyncedAt="2026-03-04T10:00:00.000Z" />)
+  expect(screen.queryByRole('heading', { name: 'Build your first interview briefing' })).not.toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Example' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeEnabled()
   expect(screen.getByText('Synced 2026-03-04')).toBeInTheDocument()
-  expect(screen.getByRole('textbox', { name: 'Search projects and technologies' })).toHaveValue('Example')
+  expect(screen.getByRole('textbox', { name: 'Search projects and technologies' })).toBeInTheDocument()
 })
 
 it('refreshes server data after a successful sync and reports the count', async () => {
@@ -200,4 +203,60 @@ it.each(['response', 'network'])('sanitizes sync %s errors', async failure => {
   fireEvent.click(screen.getByRole('button', { name: 'Sync GitHub' }))
   expect(await screen.findByRole('status')).toHaveTextContent('Unable to sync projects. Please try again.')
   expect(screen.queryByText(/private details/)).not.toBeInTheDocument()
+})
+
+const thirteenProjects: DashboardProject[] = Array.from({ length: 13 }, (_, i) => ({
+  ...project,
+  id: `p${i + 1}`,
+  name: `Project ${i + 1}`,
+  full_name: `owner/Project-${i + 1}`,
+  html_url: `https://github.com/owner/Project-${i + 1}`,
+  updated_at: `2026-03-${String(25 - i).padStart(2, '0')}T10:00:00.000Z`,
+}))
+
+it('paginates the filtered project grid twelve cards per page', () => {
+  render(<Dashboard initialProjects={thirteenProjects} />)
+  const pages = () => screen.getByRole('navigation', { name: 'Project pages' })
+
+  expect(screen.getByRole('link', { name: 'Project 1' })).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Project 12' })).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Project 13' })).not.toBeInTheDocument()
+  expect(pages()).toHaveTextContent('Showing 1–12 of 13')
+  expect(pages()).toHaveTextContent('Page 1 of 2')
+  expect(within(pages()).getByRole('button', { name: 'Previous' })).toBeDisabled()
+  expect(within(pages()).getByRole('button', { name: 'Next' })).toBeEnabled()
+
+  fireEvent.click(within(pages()).getByRole('button', { name: 'Next' }))
+  expect(screen.getByRole('link', { name: 'Project 13' })).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Project 1' })).not.toBeInTheDocument()
+  expect(pages()).toHaveTextContent('Showing 13–13 of 13')
+  expect(pages()).toHaveTextContent('Page 2 of 2')
+  expect(within(pages()).getByRole('button', { name: 'Next' })).toBeDisabled()
+
+  fireEvent.click(within(pages()).getByRole('button', { name: 'Previous' }))
+  expect(screen.getByRole('link', { name: 'Project 1' })).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Project 13' })).not.toBeInTheDocument()
+  expect(pages()).toHaveTextContent('Page 1 of 2')
+})
+
+it('resets to the first page when search, sort, or visibility changes', () => {
+  render(<Dashboard initialProjects={thirteenProjects} privateReposConnected />)
+  const pages = () => screen.getByRole('navigation', { name: 'Project pages' })
+
+  fireEvent.click(within(pages()).getByRole('button', { name: 'Next' }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search projects and technologies' }), { target: { value: 'Project 13' } })
+  expect(screen.getByRole('link', { name: 'Project 13' })).toBeInTheDocument()
+  expect(screen.queryByRole('navigation', { name: 'Project pages' })).not.toBeInTheDocument()
+
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search projects and technologies' }), { target: { value: '' } })
+  expect(pages()).toHaveTextContent('Page 1 of 2')
+
+  fireEvent.click(within(pages()).getByRole('button', { name: 'Next' }))
+  fireEvent.change(screen.getByRole('combobox', { name: 'Sort projects' }), { target: { value: 'name' } })
+  expect(pages()).toHaveTextContent('Page 1 of 2')
+
+  fireEvent.click(within(pages()).getByRole('button', { name: 'Next' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Private' }))
+  fireEvent.click(screen.getByRole('button', { name: 'All' }))
+  expect(pages()).toHaveTextContent('Page 1 of 2')
 })

@@ -2,11 +2,13 @@ import { NextResponse } from 'next/server'
 import { authenticateUser, getProviderToken } from '@/lib/api-auth'
 import { apiErrorResponse, objectBody, readJsonBody } from '@/lib/api-validation'
 import { enforceRateLimit } from '@/lib/rate-limit'
-import { fetchGithubPackageDependencies, fetchGithubRepoLanguages, fetchGithubRepos, fetchGithubRootEntries, fetchGithubTokenScopes, type GithubRepo } from '@/lib/github/api'
+import { fetchGithubDirectoryEntries, fetchGithubPackageDependencies, fetchGithubRepoLanguages, fetchGithubRepos, fetchGithubRootEntries, fetchGithubTokenScopes, type GithubRepo } from '@/lib/github/api'
 import { mergeTechnologies, normalizeTechnology, technologiesFromPackageDependencies } from '@/lib/package-technologies'
 import { technologiesFromManifestFiles } from '@/lib/manifest-technologies'
 
 const MANIFEST_BATCH_SIZE = 10
+const WORKSPACE_ROOTS = ['apps', 'packages', 'services'] as const
+const MAX_WORKSPACE_MANIFESTS = 12
 // The repository-list traversal has its own 60-second budget inside
 // fetchGithubRepos; enrichment gets a separate bound so a slow provider or a
 // large cold-cache portfolio cannot stall the whole import.
@@ -14,6 +16,26 @@ const ENRICHMENT_BUDGET_MS = 45_000
 
 type ExistingProject = { github_repo_id: number; technologies: string[] | null }
 type IndexedRepo = GithubRepo & { technologies: string[] }
+
+async function fetchWorkspaceDependencies(owner: string, repo: string, files: string[] | null, identity: { userId: string; accessToken: string }) {
+  const roots = files ? WORKSPACE_ROOTS.filter(root => files.includes(root)) : []
+  if (!roots.length) return { dependencies: [] as string[], found: false }
+  const listings = await Promise.all(roots.map(root => fetchGithubDirectoryEntries(owner, repo, root, identity)))
+  const manifests: string[] = []
+  for (const [index, root] of roots.entries()) {
+    const names = (listings[index] || [])
+      .filter(entry => entry.type === 'dir')
+      .map(entry => entry.name)
+      .sort()
+    for (const name of names) manifests.push(`${root}/${name}/package.json`)
+  }
+  const results = await Promise.all(manifests.slice(0, MAX_WORKSPACE_MANIFESTS)
+    .map(path => fetchGithubPackageDependencies(owner, repo, identity, path)))
+  return {
+    dependencies: results.flatMap(dependencies => dependencies ?? []),
+    found: results.some(dependencies => dependencies !== null),
+  }
+}
 
 async function enrichRepository(repo: GithubRepo, existing: Map<number, string[]>, userId: string, accessToken: string) {
   const identity = { userId, accessToken }
@@ -24,21 +46,23 @@ async function enrichRepository(repo: GithubRepo, existing: Map<number, string[]
   ])
   // The root listing tells us whether package.json exists, so non-JS
   // repositories skip an extra request that would 404.
-  const dependencies = files?.includes('package.json')
+  const rootDependencies = files?.includes('package.json')
     ? await fetchGithubPackageDependencies(owner, repo.name, identity)
     : null
+  const workspace = await fetchWorkspaceDependencies(owner, repo.name, files, identity)
+  const dependencies = mergeTechnologies(rootDependencies, workspace.dependencies)
   const primary = repo.language && normalizeTechnology(repo.language)
   return {
     repo: {
       ...repo,
       technologies: mergeTechnologies(
         existing.get(repo.id),
-        dependencies && technologiesFromPackageDependencies(dependencies),
+        dependencies.length ? technologiesFromPackageDependencies(dependencies) : null,
         files && technologiesFromManifestFiles(files),
         languages?.filter(language => normalizeTechnology(language) !== primary),
       )
     } as IndexedRepo,
-    packageJson: dependencies !== null,
+    packageJson: rootDependencies !== null || workspace.found,
   }
 }
 

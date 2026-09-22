@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { fetchGithubPackageDependencies, fetchGithubRepos, fetchGithubReadme, MAX_GITHUB_PAGES } from './api'
+import { fetchGithubDirectoryEntries, fetchGithubPackageDependencies, fetchGithubRepos, fetchGithubReadme, MAX_GITHUB_PAGES } from './api'
 
 const io = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(), cache: new Map<string, unknown>() }))
 // Mock Upstash Redis
@@ -135,6 +135,66 @@ describe('GitHub helpers', () => {
     await expect(fetchGithubPackageDependencies('owner', 'malformed', identity)).rejects.toThrow('GitHub service temporarily unavailable')
     await expect(fetchGithubPackageDependencies('owner', '..', identity)).rejects.toThrow()
     expect(fetch).toHaveBeenCalledTimes(2)
+  })
+  it('fetches, validates and caches conventional workspace directory entries', async () => {
+    const entries = [
+      { name: 'web', type: 'dir' },
+      { name: 'api', type: 'dir' },
+      { name: 'README.md', type: 'file' },
+      { name: 'linked', type: 'symlink' },
+    ]
+    vi.mocked(fetch).mockResolvedValue(response(entries))
+    expect(await fetchGithubDirectoryEntries('owner', 'repo', 'apps', identity)).toEqual(entries)
+    expect(await fetchGithubDirectoryEntries('owner', 'repo', 'apps', identity)).toEqual(entries)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledWith('https://api.github.com/repos/owner/repo/contents/apps', expect.objectContaining({
+      redirect: 'error', headers: expect.objectContaining({ Accept: 'application/vnd.github+json' })
+    }))
+    expect(io.set).toHaveBeenCalledWith(expect.any(String), { found: true, entries }, { ex: 3600 })
+  })
+  it('negative-caches missing workspace directories and validates cached entries', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response('', { status: 404 }))
+    expect(await fetchGithubDirectoryEntries('owner', 'repo', 'packages', identity)).toBeNull()
+    expect(await fetchGithubDirectoryEntries('owner', 'repo', 'packages', identity)).toBeNull()
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(io.set).toHaveBeenCalledWith(expect.any(String), { found: false, entries: [] }, { ex: 3600 })
+    io.get.mockResolvedValue({ found: true, entries: [{ name: 'x', type: 'bogus' }] })
+    await expect(fetchGithubDirectoryEntries('owner', 'repo', 'services', identity)).rejects.toThrow('GitHub service temporarily unavailable')
+  })
+  it.each([
+    [{ name: 'sub/../dir', type: 'dir' }],
+    [{ name: '..', type: 'dir' }],
+    [{ name: '', type: 'dir' }],
+    [{ name: 'ok', type: 'directory' }],
+    [{ name: 'ok' }],
+    [{ name: 5, type: 'dir' }],
+    'not-an-array',
+  ])('rejects malformed directory payloads without caching', async payload => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(payload)))
+    await expect(fetchGithubDirectoryEntries('owner', 'repo', 'apps', identity)).rejects.toThrow('GitHub service temporarily unavailable')
+    expect(io.set).not.toHaveBeenCalled()
+  })
+  it('fetches selected nested package manifests with raw headers under a path-scoped cache', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ dependencies: { fastify: '^5', vite: '^7' } })))
+    const expected = ['fastify', 'vite']
+    expect(await fetchGithubPackageDependencies('owner', 'repo', identity, 'apps/api/package.json')).toEqual(expected)
+    expect(await fetchGithubPackageDependencies('owner', 'repo', identity, 'apps/api/package.json')).toEqual(expected)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledWith('https://api.github.com/repos/owner/repo/contents/apps/api/package.json', expect.objectContaining({
+      redirect: 'error', headers: expect.objectContaining({ Accept: 'application/vnd.github.raw' })
+    }))
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ dependencies: { next: '15.5.24' } })))
+    expect(await fetchGithubPackageDependencies('owner', 'repo', identity)).toEqual(['next'])
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+  it.each([
+    '../package.json', 'apps/../package.json', 'apps/../secret/package.json',
+    'apps/./package.json', 'docs/web/package.json', 'apps/api/nested/package.json',
+    'apps//package.json', 'packages/web/package.json/extra', 'PACKAGE.JSON',
+  ])('rejects unsafe package manifest path %s without fetching', async path => {
+    await expect(fetchGithubPackageDependencies('owner', 'repo', identity, path)).rejects.toThrow('GitHub service temporarily unavailable')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(io.set).not.toHaveBeenCalled()
   })
   it('negative-caches missing READMEs like the other fetchers', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('', { status: 404 }))

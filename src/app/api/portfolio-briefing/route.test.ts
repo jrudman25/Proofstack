@@ -92,6 +92,17 @@ it('keeps the previous briefing when persistence fails after generation', async 
   expect(await response.text()).not.toContain('secret')
 })
 
+it('falls back to the next model when the first response is unusable', async () => {
+  io.generate.mockRejectedValueOnce(new Error('secret-provider')).mockResolvedValueOnce({ text: generated })
+  const response = await POST()
+  expect(response.status).toBe(200)
+  expect(io.generate).toHaveBeenCalledTimes(2)
+  expect(io.generate.mock.calls[0][0].model).toBe('gemini-3.5-flash')
+  expect(io.generate.mock.calls[1][0].model).toBe('gemini-3.1-flash-lite')
+  const { briefing } = await response.json()
+  expect(briefing.summary).toBe('A TypeScript portfolio.')
+})
+
 it('rejects fabricated project references from every model', async () => {
   io.generate.mockResolvedValue({ text: generated.replaceAll(projectId, 'attacker-project') })
   const response = await POST()

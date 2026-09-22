@@ -9,6 +9,18 @@ import ChatMarkdown from '@/components/ChatMarkdown'
 const MAX_HISTORY_MESSAGES = 20
 const MAX_HISTORY_CHARS = 16000
 
+const PORTFOLIO_PROMPTS = [
+  'Which projects best show backend work?',
+  'What themes connect my projects?',
+  'Where is my evidence weakest?',
+]
+
+const PROJECT_PROMPTS = [
+  "What are this project's key decisions?",
+  'How should I explain this project?',
+  'What evidence is missing?',
+]
+
 type Message = { role: 'user' | 'assistant'; content: string }
 
 function boundHistory(messages: Message[]): { messages: Message[]; truncated: boolean } {
@@ -117,6 +129,13 @@ export default function ChatWidget({ projectId, projectName }: { projectId?: str
     inputRef.current?.focus()
   }
 
+  const startPrompt = (prompt: string) => {
+    setInput(prompt)
+    inputRef.current?.focus()
+  }
+
+  const prompts = projectName ? PROJECT_PROMPTS : PORTFOLIO_PROMPTS
+
   return (
     <>
       <button
@@ -127,9 +146,10 @@ export default function ChatWidget({ projectId, projectName }: { projectId?: str
         aria-hidden={isOpen}
         tabIndex={isOpen ? -1 : 0}
         onClick={() => setIsOpen(true)}
-        className={`fixed bottom-4 right-4 z-50 flex h-12 w-12 items-center justify-center border border-brand-dim bg-raised shadow-2xl transition-transform hover:scale-105 hover:bg-brand hover:text-on-brand sm:bottom-6 sm:right-6 ${isOpen ? 'scale-0' : 'scale-100'}`}
+        className={`fixed bottom-4 right-4 z-50 flex items-center justify-center border border-brand-dim bg-raised shadow-2xl transition-transform hover:scale-105 hover:bg-brand hover:text-on-brand sm:bottom-6 sm:right-6 ${projectName ? 'h-12 w-12' : 'h-12 gap-2 px-4'} ${isOpen ? 'scale-0' : 'scale-100'}`}
       >
         <MessageSquare className="h-5 w-5" />
+        {!projectName && <span className="eyebrow hidden sm:inline">Ask portfolio</span>}
       </button>
 
       {isOpen && <div id="portfolio-chat" role="region" aria-labelledby="chat-title" onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); closeChat() } }} className="corner-ticks fixed inset-x-3 bottom-3 z-50 flex h-[min(500px,calc(100dvh-1.5rem))] flex-col border border-line bg-surface shadow-2xl sm:inset-x-auto sm:bottom-6 sm:right-6 sm:w-96">
@@ -163,6 +183,18 @@ export default function ChatWidget({ projectId, projectName }: { projectId?: str
                   ? `Answers use only ${projectName}'s repository metadata and README evidence.`
                   : 'Answers use your synced repository metadata and README evidence, with no outside knowledge.'}
               </p>
+              <div className="mx-auto mt-5 flex max-w-[280px] flex-col gap-2">
+                {prompts.map(prompt => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => startPrompt(prompt)}
+                    className="border border-line bg-raised px-3 py-2 text-left text-xs leading-relaxed text-dim transition-colors hover:border-line-bright hover:text-foreground focus-visible:text-foreground"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {truncated && (

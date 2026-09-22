@@ -3,15 +3,13 @@ import { authenticateUser } from '@/lib/api-auth'
 import { ApiError, apiErrorResponse, parseChatBody, readJsonBody } from '@/lib/api-validation'
 import { enforceRateLimit } from '@/lib/rate-limit'
 import { generateEmbedding } from '@/lib/gemini/processor'
-import { createGeminiClient, GENERATION_MODELS } from '@/lib/gemini/client'
+import { createGeminiClient, generateWithFallback } from '@/lib/gemini/client'
 import {
   aiEligible, evidenceStatus, toEvidenceEntry,
   EVIDENCE_BRIEF_FIELDS, EVIDENCE_PROJECT_FIELDS,
   type EvidenceBriefRow, type EvidenceProjectRow,
 } from '@/lib/project-evidence'
 
-// Primary and fallback models for Chat
-const CHAT_MODELS = GENERATION_MODELS
 const PROJECT_CONTEXT_LIMIT = 500
 
 function normalizeTechnology(value: string) {
@@ -142,29 +140,13 @@ export async function POST(request: Request) {
       }) }
     ]
     const ai = createGeminiClient()
-    let responseText = ''
-    let success = false
-
-    for (const modelName of CHAT_MODELS) {
-      try {
-        const result = await ai.models.generateContent({
-          model: modelName,
-          contents: formattedMessages,
-          config: { systemInstruction: { parts: [{ text: systemPrompt }] } }
-        })
-        const text = result.text
-        if (typeof text !== 'string' || !text.trim()) throw new Error('Invalid chat response')
-        responseText = text
-        success = true
-        break // break if successful
-      } catch {
-        console.warn(`Model ${modelName} failed in chat, falling back...`)
-      }
-    }
-
-    if (!success) {
-      throw new Error('All Gemini models failed to generate a chat response.')
-    }
+    const responseText = await generateWithFallback(ai, {
+      contents: formattedMessages,
+      config: { systemInstruction: { parts: [{ text: systemPrompt }] } },
+    }, text => {
+      if (!text.trim()) throw new Error('Invalid chat response')
+      return text
+    }, 'chat')
 
     return NextResponse.json({
       role: 'assistant',

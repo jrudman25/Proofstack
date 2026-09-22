@@ -62,12 +62,26 @@ it('merges package, manifest, and language technologies with existing metadata',
     if (parsed.pathname.endsWith('/repo-0/contents/package.json')) {
       return new Response(JSON.stringify({ dependencies: { next: '15.5.24', react: '^19.0.0' } }))
     }
+    if (parsed.pathname.endsWith('/repo-0/contents/apps/api/package.json')) {
+      return new Response(JSON.stringify({ dependencies: { fastify: '^5' } }))
+    }
+    if (parsed.pathname.endsWith('/repo-0/contents/apps/web/package.json')) {
+      return new Response(JSON.stringify({ dependencies: { vite: '^7' } }))
+    }
     if (parsed.pathname.endsWith('/contents/package.json')) return new Response('', { status: 404 })
+    if (parsed.pathname.endsWith('/repo-0/contents/apps')) {
+      return new Response(JSON.stringify([
+        { name: 'web', type: 'dir' },
+        { name: 'api', type: 'dir' },
+        { name: 'README.md', type: 'file' },
+      ]))
+    }
     if (parsed.pathname.endsWith('/repo-0/contents')) {
       return new Response(JSON.stringify([
         { name: 'package.json', type: 'file' },
         { name: 'Dockerfile', type: 'file' },
         { name: 'README.md', type: 'file' },
+        { name: 'apps', type: 'dir' },
       ]))
     }
     if (parsed.pathname.endsWith('/contents')) return new Response(JSON.stringify([]))
@@ -86,8 +100,33 @@ it('merges package, manifest, and language technologies with existing metadata',
   // into technologies; secondary languages are appended.
   expect(io.upsert.mock.calls[0][0][0]).toMatchObject({
     language: 'TypeScript',
-    technologies: ['Custom Tool', 'Next.js', 'React', 'Docker', 'CSS'],
+    technologies: ['Custom Tool', 'Next.js', 'React', 'Fastify', 'Vite', 'Docker', 'CSS'],
   })
+})
+it('caps selected workspace manifests at twelve per repository', async () => {
+  vi.mocked(fetch).mockImplementation(async input => {
+    const parsed = new URL(String(input))
+    if (parsed.pathname.endsWith('/repo-0/contents/apps')) {
+      return new Response(JSON.stringify(
+        Array.from({ length: 15 }, (_, i) => ({ name: `pkg-${String(i).padStart(2, '0')}`, type: 'dir' }))
+          .concat([{ name: 'not-a-dir.txt', type: 'file' }])))
+    }
+    if (parsed.pathname.includes('/contents/')) return new Response('', { status: 404 })
+    if (parsed.pathname.endsWith('/repo-0/contents')) {
+      return new Response(JSON.stringify([{ name: 'apps', type: 'dir' }]))
+    }
+    if (parsed.pathname.endsWith('/contents')) return new Response(JSON.stringify([]))
+    if (parsed.pathname.endsWith('/languages')) return new Response(JSON.stringify({}))
+    const page = Number(parsed.searchParams.get('page'))
+    return new Response(JSON.stringify(repos.slice((page - 1) * 100, page * 100)))
+  })
+  const response = await POST(request())
+  expect(response.status).toBe(200)
+  const manifestFetches = vi.mocked(fetch).mock.calls
+    .map(([url]) => new URL(String(url)).pathname)
+    .filter(pathname => /\/contents\/apps\/[^/]+\/package\.json$/.test(pathname))
+  expect(manifestFetches).toEqual(
+    Array.from({ length: 12 }, (_, i) => `/repos/owner/repo-0/contents/apps/pkg-${String(i).padStart(2, '0')}/package.json`))
 })
 it('prefers the encrypted stored token without consulting the transient provider session', async () => {
   io.getToken.mockResolvedValue('stored-token')

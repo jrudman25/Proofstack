@@ -216,7 +216,7 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
         <div>
           <h2 id="brief-heading" className="text-xl font-semibold tracking-tight">Project brief</h2>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-dim">
-            Your own account of the project: the context GitHub cannot show. Private unless you select it for a future public profile.
+            Your own account of the project: the context GitHub cannot show. Private unless you select it for your public profile.
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -280,7 +280,7 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
           <details className="border border-line">
             <summary className="label cursor-pointer select-none px-4 py-3 text-dim transition-colors hover:text-foreground">
               Settings
-              <span className="ml-3 font-normal normal-case tracking-normal text-dim">Lifecycle status and future portfolio visibility</span>
+              <span className="ml-3 font-normal normal-case tracking-normal text-dim">Lifecycle status and public profile visibility</span>
             </summary>
             <div className="grid gap-5 border-t border-line p-5 md:grid-cols-2">
               <label className="space-y-2">
@@ -309,7 +309,7 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
                   className="field px-3 py-2.5 font-sans"
                 >
                   <option value="private">Private workspace</option>
-                  <option value="public">Selected for future public profile</option>
+                  <option value="public">Selected for public profile</option>
                 </select>
                 <span className="block text-xs leading-relaxed text-dim">Appears on your public profile only while the profile itself is published from Account.</span>
               </label>

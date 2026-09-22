@@ -214,6 +214,8 @@ const SORTS = [
   { key: 'name', label: 'Alphabetical' },
 ] as const
 
+const PROJECTS_PER_PAGE = 12
+
 const LIFECYCLE_LABELS: Record<string, string> = {
   prototype: 'Prototype', active: 'Active', maintained: 'Maintained', completed: 'Completed', archived: 'Archived',
 }
@@ -252,6 +254,7 @@ export default function Dashboard({
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'updated' | 'stars' | 'name'>('updated')
   const [repositoryVisibility, setRepositoryVisibility] = useState<'all' | 'public' | 'private'>('all')
+  const [projectPage, setProjectPage] = useState(1)
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   const [connectMessage, setConnectMessage] = useState('')
@@ -349,6 +352,15 @@ export default function Dashboard({
     return result
   }, [projects, repositoryVisibility, search, sort])
 
+  const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / PROJECTS_PER_PAGE))
+  const displayedPage = Math.min(projectPage, totalPages)
+  const visibleProjects = filteredAndSorted.slice(
+    (displayedPage - 1) * PROJECTS_PER_PAGE,
+    displayedPage * PROJECTS_PER_PAGE,
+  )
+  const pageStart = (displayedPage - 1) * PROJECTS_PER_PAGE + 1
+  const pageEnd = Math.min(displayedPage * PROJECTS_PER_PAGE, filteredAndSorted.length)
+
   return (
     <div className="min-h-screen font-sans">
       <header className="sticky top-0 z-40 border-b border-line bg-ink/90 backdrop-blur-md">
@@ -394,9 +406,40 @@ export default function Dashboard({
       </header>
 
       <main className="mx-auto max-w-7xl px-4 pb-24 sm:px-6">
-        <PortfolioBriefingPanel projectCount={projects.length} initial={initialBriefing} />
+        {projects.length === 0 && !loadError ? (
+          <section aria-labelledby="getting-started-heading" className="corner-ticks relative mt-6 border border-line bg-surface px-5 py-5 sm:px-6">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+              <div>
+                <h2 id="getting-started-heading" className="text-xl font-semibold tracking-tight">Build your first interview briefing</h2>
+                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-dim">
+                  Start by importing your public GitHub repositories. You can review the catalog before generating or publishing anything.
+                </p>
+                <ol className="mt-5 grid gap-3 sm:grid-cols-3">
+                  {[
+                    ['01', 'Sync repositories', 'Import public repository facts from GitHub.'],
+                    ['02', 'Add your context', 'Open a project to capture your role and decisions.'],
+                    ['03', 'Prepare a briefing', 'Generate themes, spotlights, and practice questions.'],
+                  ].map(([number, title, detail]) => (
+                    <li key={number} className="border-l border-line-bright pl-3">
+                      <span className="eyebrow text-brand">{number}</span>
+                      <span className="mt-1 block text-sm font-medium text-foreground">{title}</span>
+                      <span className="mt-1 block text-xs leading-relaxed text-dim">{detail}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+              <Button onClick={() => handleSync()} disabled={isSyncing} className="eyebrow w-full sm:w-auto">
+                <RefreshCw className={isSyncing ? 'animate-spin' : ''} />
+                {isSyncing ? 'Importing repositories' : 'Import from GitHub'}
+              </Button>
+            </div>
+            {syncMessage && <p role="status" className="mt-4 font-mono text-[11px] text-dim">{syncMessage}</p>}
+          </section>
+        ) : !loadError ? (
+          <PortfolioBriefingPanel projectCount={projects.length} initial={initialBriefing} />
+        ) : null}
 
-        <section id="projects" aria-labelledby="projects-heading" className="mt-6 scroll-mt-20 border-b border-line pb-4">
+        {projects.length > 0 && <section id="projects" aria-labelledby="projects-heading" className="mt-6 scroll-mt-20 border-b border-line pb-4">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-baseline gap-3">
               <h2 id="projects-heading" className="label text-foreground">Projects</h2>
@@ -434,7 +477,7 @@ export default function Dashboard({
                 aria-label="Search projects and technologies"
                 placeholder="Search projects and technologies"
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={e => { setSearch(e.target.value); setProjectPage(1) }}
                 className="field bg-surface py-2 pl-8 pr-3"
               />
             </div>
@@ -446,7 +489,7 @@ export default function Dashboard({
                     <button
                       key={visibility}
                       aria-pressed={repositoryVisibility === visibility}
-                      onClick={() => setRepositoryVisibility(visibility)}
+                      onClick={() => { setRepositoryVisibility(visibility); setProjectPage(1) }}
                       className={`eyebrow flex-1 px-3 py-2 transition-colors sm:flex-none ${
                         repositoryVisibility === visibility ? 'bg-raised text-brand' : 'text-dim hover:text-foreground'
                       }`}
@@ -462,7 +505,7 @@ export default function Dashboard({
                 <select
                   aria-label="Sort projects"
                   value={sort}
-                  onChange={event => setSort(event.target.value as typeof sort)}
+                  onChange={event => { setSort(event.target.value as typeof sort); setProjectPage(1) }}
                   className="field min-w-44 bg-surface px-3 py-2 font-sans text-sm"
                 >
                   {SORTS.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
@@ -488,7 +531,7 @@ export default function Dashboard({
               </div>
             </div>
           )}
-        </section>
+        </section>}
 
         {loadError && (
           <div role="alert" className="mt-6 border border-line bg-surface px-6 py-5">
@@ -502,8 +545,8 @@ export default function Dashboard({
         )}
 
         {/* Project cards */}
-        {!loadError && <section className="grid grid-cols-1 gap-4 pt-6 md:grid-cols-2 xl:grid-cols-3">
-          {filteredAndSorted.map((project, i) => (
+        {!loadError && projects.length > 0 && <section className="grid grid-cols-1 gap-4 pt-6 md:grid-cols-2 xl:grid-cols-3">
+          {visibleProjects.map((project, i) => (
             <article
               key={project.id}
               style={{ animationDelay: `${Math.min(i, 12) * 45}ms` }}
@@ -617,6 +660,37 @@ export default function Dashboard({
                 </Button>
               )}
             </div>
+          )}
+
+          {filteredAndSorted.length > PROJECTS_PER_PAGE && (
+            <nav aria-label="Project pages" className="col-span-full flex flex-col items-center gap-3 pt-2 sm:flex-row sm:justify-between">
+              <span className="font-mono text-[11px] text-dim">
+                Showing {pageStart}–{pageEnd} of {filteredAndSorted.length}
+              </span>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="eyebrow"
+                  disabled={displayedPage === 1}
+                  onClick={() => setProjectPage(Math.max(1, displayedPage - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="whitespace-nowrap font-mono text-[11px] text-dim">
+                  Page {displayedPage} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="eyebrow"
+                  disabled={displayedPage === totalPages}
+                  onClick={() => setProjectPage(Math.min(totalPages, displayedPage + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            </nav>
           )}
         </section>}
       </main>

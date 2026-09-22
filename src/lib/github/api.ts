@@ -7,6 +7,7 @@ export type GithubIdentity = UserContext & { accessToken: string | undefined }
 export const MAX_GITHUB_PAGES = 50
 const MAX_PACKAGE_BYTES = 256 * 1024
 const PACKAGE_DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const
+export type GithubDirectoryEntry = { name: string; type: 'file' | 'dir' | 'symlink' | 'submodule' }
 export type GithubRepo = {
   id: number; name: string; full_name: string; description: string | null
   html_url: string; language: string | null; homepage: string | null
@@ -163,14 +164,23 @@ export async function fetchGithubTokenScopes(identity: GithubIdentity): Promise<
   }
 }
 
-export async function fetchGithubPackageDependencies(owner: string, repo: string, identity: GithubIdentity): Promise<string[] | null> {
+function validPackageManifestPath(path: string) {
+  if (path === 'package.json') return true
+  return /^(apps|packages|services)\/[^/]+\/package\.json$/.test(path)
+    && !path.split('/').some(segment => segment === '.' || segment === '..')
+}
+
+export async function fetchGithubPackageDependencies(owner: string, repo: string, identity: GithubIdentity, path = 'package.json'): Promise<string[] | null> {
   try {
-    if (!validRepositoryPath(owner, repo) || !identity.accessToken?.trim()) unavailable()
+    if (!validRepositoryPath(owner, repo) || !validPackageManifestPath(path) || !identity.accessToken?.trim()) unavailable()
     const redis = createRedis()
-    const key = cacheKey(identity, 'github-package', owner, repo)
+    const key = path === 'package.json'
+      ? cacheKey(identity, 'github-package', owner, repo)
+      : cacheKey(identity, 'github-package', owner, repo, path)
     const cached = await redis.get(key)
     if (cached !== null) return parsePackageCache(cached)
-    const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/package.json`, {
+    const encodedPath = path.split('/').map(encodeURIComponent).join('/')
+    const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}`, {
       headers: headers(identity, 'application/vnd.github.raw'), redirect: 'error',
       signal: AbortSignal.timeout(15_000),
     })
@@ -272,6 +282,52 @@ export async function fetchGithubRootEntries(owner: string, repo: string, identi
     const names = parseRootEntries(JSON.parse(text))
     await redis.set(key, { found: true, names }, { ex: 3600 })
     return names
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    unavailable()
+  }
+}
+
+const DIRECTORY_ENTRY_TYPES = ['file', 'dir', 'symlink', 'submodule'] as const
+
+function parseDirectoryEntries(value: unknown): GithubDirectoryEntry[] {
+  if (!Array.isArray(value) || value.length > MAX_ROOT_ENTRIES) unavailable()
+  return value.map((entry: unknown) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) unavailable()
+    const e = entry as Record<string, unknown>
+    if (typeof e.name !== 'string' || e.name.length < 1 || e.name.length > 255
+      || e.name.includes('/') || e.name === '.' || e.name === '..'
+      || !DIRECTORY_ENTRY_TYPES.includes(e.type as GithubDirectoryEntry['type'])) unavailable()
+    return { name: e.name, type: e.type as GithubDirectoryEntry['type'] }
+  })
+}
+function parseDirectoryEntriesCache(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable()
+  const cached = value as Record<string, unknown>
+  if (cached.found === false && Array.isArray(cached.entries) && cached.entries.length === 0) return null
+  if (cached.found !== true) unavailable()
+  return parseDirectoryEntries(cached.entries)
+}
+export async function fetchGithubDirectoryEntries(owner: string, repo: string, directory: 'apps' | 'packages' | 'services', identity: GithubIdentity): Promise<GithubDirectoryEntry[] | null> {
+  try {
+    if (!validRepositoryPath(owner, repo) || !identity.accessToken?.trim()) unavailable()
+    const redis = createRedis()
+    const key = cacheKey(identity, 'github-directory', owner, repo, directory)
+    const cached = await redis.get(key)
+    if (cached !== null) return parseDirectoryEntriesCache(cached)
+    const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeURIComponent(directory)}`, {
+      headers: headers(identity, 'application/vnd.github+json'), redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (res.status === 404) {
+      await redis.set(key, { found: false, entries: [] }, { ex: 3600 })
+      return null
+    }
+    if (!res.ok) unavailable()
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(await readBodyBytes(res, 2 * 1024 * 1024))
+    const entries = parseDirectoryEntries(JSON.parse(text))
+    await redis.set(key, { found: true, entries }, { ex: 3600 })
+    return entries
   } catch (error) {
     if (error instanceof ApiError) throw error
     unavailable()
