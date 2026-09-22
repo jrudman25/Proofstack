@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import ProjectBriefEditor from './ProjectBriefEditor'
 import type { ProjectBrief } from '@/types'
@@ -25,7 +25,7 @@ const savedBrief: ProjectBrief = {
   updated_at: '2026-09-12T00:00:00.000Z',
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); history.replaceState(null, '', '/'); Reflect.deleteProperty(Element.prototype, 'scrollIntoView') })
 
 it('opens a saved brief in read mode and enters editing explicitly', () => {
   render(<ProjectBriefEditor projectId={projectId} initialBrief={savedBrief} />)
@@ -86,6 +86,35 @@ it('offers to reload the latest version after a conflict', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Reload latest' }))
   expect(await screen.findByRole('status')).toHaveTextContent('Latest version loaded.')
   expect(screen.getByRole('textbox', { name: 'Purpose' })).toHaveValue('Prepare developers for interviews')
+})
+
+it('exposes the publication section as a deep-linkable disclosure', () => {
+  const { container } = render(<ProjectBriefEditor projectId={projectId} />)
+  const details = container.querySelector('#publication-settings')
+  expect(details).not.toBeNull()
+  expect(details).toHaveTextContent('Publication and lifecycle')
+  expect(within(details as HTMLElement).getByRole('combobox', { name: 'Lifecycle status' })).toBeInTheDocument()
+  expect(within(details as HTMLElement).getByRole('combobox', { name: 'Portfolio visibility' })).toBeInTheDocument()
+})
+
+it('opens the publication section on a #publication-settings deep link and toggles normally', async () => {
+  window.location.hash = '#publication-settings'
+  const scrollIntoView = vi.fn()
+  Element.prototype.scrollIntoView = scrollIntoView
+  const { container } = render(<ProjectBriefEditor projectId={projectId} initialBrief={savedBrief} />)
+  await screen.findByRole('form', { name: 'Edit project brief' })
+  const details = container.querySelector('#publication-settings') as HTMLDetailsElement
+  expect(details.open).toBe(true)
+  await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
+  fireEvent.click(within(details).getByText('Publication and lifecycle'))
+  expect(details.open).toBe(false)
+  fireEvent.click(within(details).getByText('Publication and lifecycle'))
+  expect(details.open).toBe(true)
+})
+
+it('keeps the publication section closed by default', () => {
+  const { container } = render(<ProjectBriefEditor projectId={projectId} />)
+  expect((container.querySelector('#publication-settings') as HTMLDetailsElement).open).toBe(false)
 })
 
 it.each(['response', 'network'])('does not expose project brief %s failures', async failure => {

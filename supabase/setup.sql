@@ -48,7 +48,6 @@ create table projects (
   github_fork boolean default false not null,
   github_owner_login text,
   github_owner_type text check (github_owner_type is null or github_owner_type in ('User', 'Organization')),
-  summary text,
   technologies text[] default '{}',
   has_code_map boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -171,33 +170,18 @@ create policy "Users can insert own portfolio briefings" on portfolio_briefings 
 create policy "Users can update own portfolio briefings" on portfolio_briefings for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "Users can delete own portfolio briefings" on portfolio_briefings for delete using (auth.uid() = user_id);
 
--- Milestones policies
+-- Milestones policies. Task and milestone tracking is retired: existing rows
+-- stay readable by their owner, but browser writes are revoked entirely.
 create policy "Users can view own project milestones" on milestones for select using (
   exists (select 1 from projects where projects.id = milestones.project_id and projects.user_id = auth.uid())
 );
-create policy "Users can insert own project milestones" on milestones for insert with check (
-  exists (select 1 from projects where projects.id = milestones.project_id and projects.user_id = auth.uid())
-);
-create policy "Users can update own project milestones" on milestones for update using (
-  exists (select 1 from projects where projects.id = milestones.project_id and projects.user_id = auth.uid())
-);
-create policy "Users can delete own project milestones" on milestones for delete using (
-  exists (select 1 from projects where projects.id = milestones.project_id and projects.user_id = auth.uid())
-);
+revoke insert, update, delete on table public.milestones from authenticated;
 
 -- Todos policies
 create policy "Users can view own project todos" on todos for select using (
   exists (select 1 from projects where projects.id = todos.project_id and projects.user_id = auth.uid())
 );
-create policy "Users can insert own project todos" on todos for insert with check (
-  exists (select 1 from projects where projects.id = todos.project_id and projects.user_id = auth.uid())
-);
-create policy "Users can update own project todos" on todos for update using (
-  exists (select 1 from projects where projects.id = todos.project_id and projects.user_id = auth.uid())
-);
-create policy "Users can delete own project todos" on todos for delete using (
-  exists (select 1 from projects where projects.id = todos.project_id and projects.user_id = auth.uid())
-);
+revoke insert, update, delete on table public.todos from authenticated;
 
 -- Project Embeddings policies
 create policy "Users can view own project embeddings" on project_embeddings for select using (

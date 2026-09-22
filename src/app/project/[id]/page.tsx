@@ -4,7 +4,7 @@ import Link from 'next/link'
 import ProjectDetailClient from '@/components/ProjectDetailClient'
 import { Logo } from '@/components/icons/Logo'
 
-const PROJECT_COLUMNS = 'id, user_id, github_repo_id, name, full_name, description, html_url, language, homepage, stargazers_count, pushed_at, github_created_at, is_private, ai_opt_in, github_fork, github_owner_login, github_owner_type, summary, technologies, has_code_map, created_at, updated_at'
+const PROJECT_COLUMNS = 'id, user_id, github_repo_id, name, full_name, description, html_url, language, homepage, stargazers_count, pushed_at, github_created_at, is_private, ai_opt_in, github_fork, github_owner_login, github_owner_type, technologies, has_code_map, created_at, updated_at'
 
 function LoadError({ message }: { message: string }) {
   return (
@@ -54,10 +54,8 @@ export default async function ProjectPage({
     notFound()
   }
 
-  const [briefResult, milestoneResult, todoResult, embeddingResult] = await Promise.all([
+  const [briefResult, embeddingResult] = await Promise.all([
     supabase.from('project_briefs').select('*').eq('project_id', id).maybeSingle(),
-    supabase.from('milestones').select('*').eq('project_id', id).order('created_at', { ascending: true }),
-    supabase.from('todos').select('*').eq('project_id', id).order('created_at', { ascending: true }),
     supabase.from('project_embeddings').select('metadata').eq('project_id', id).eq('source', 'readme').maybeSingle(),
   ])
 
@@ -68,9 +66,6 @@ export default async function ProjectPage({
       briefLoadFailed={Boolean(briefResult.error)}
       readmeIndexedPushedAt={typeof embeddingResult.data?.metadata?.pushed_at === 'string' ? embeddingResult.data.metadata.pushed_at : null}
       readmeIndexExists={Boolean(embeddingResult.data)}
-      initialMilestones={milestoneResult.error ? [] : milestoneResult.data || []}
-      initialTodos={todoResult.error ? [] : todoResult.data || []}
-      legacyLoadFailed={Boolean(milestoneResult.error || todoResult.error)}
     />
   )
 }

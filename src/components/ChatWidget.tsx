@@ -161,14 +161,24 @@ export default function ChatWidget({ projectId, projectName }: { projectId?: str
               {projectName ? `Ask about ${projectName}` : 'Ask about your portfolio'}
             </h3>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
             {messages.length > 0 && (
-              <button aria-label="Start a new conversation" onClick={newConversation} className="text-dim transition-colors hover:text-foreground">
-                <RotateCcw className="h-3.5 w-3.5" />
+              <button
+                aria-label="Start a new conversation"
+                title="New conversation"
+                onClick={newConversation}
+                className="flex h-10 w-10 items-center justify-center text-dim transition-colors hover:text-foreground"
+              >
+                <RotateCcw className="h-4 w-4" />
               </button>
             )}
             <kbd className="hidden border border-line px-1.5 py-0.5 font-mono text-[10px] uppercase text-faint sm:inline">esc</kbd>
-            <button aria-label="Close chat" onClick={closeChat} className="text-dim transition-colors hover:text-foreground">
+            <button
+              aria-label="Close chat"
+              title="Close chat"
+              onClick={closeChat}
+              className="flex h-10 w-10 items-center justify-center text-dim transition-colors hover:text-foreground"
+            >
               <X className="h-4 w-4" />
             </button>
           </div>

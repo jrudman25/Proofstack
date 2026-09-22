@@ -71,6 +71,21 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
   const [message, setMessage] = useState('')
   const [conflict, setConflict] = useState(false)
   const [lastReviewed, setLastReviewed] = useState(initialBrief?.last_reviewed_at ?? null)
+  const [publicationOpen, setPublicationOpen] = useState(false)
+  useEffect(() => {
+    if (window.location.hash !== '#publication-settings') return
+    queueMicrotask(() => {
+      setEditing(true)
+      setPublicationOpen(true)
+    })
+  }, [])
+  useEffect(() => {
+    if (!publicationOpen) return
+    const frame = requestAnimationFrame(() => {
+      document.getElementById('publication-settings')?.scrollIntoView({ block: 'start' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [publicationOpen])
   // Refs let the save handler compare the submitted snapshot against whatever
   // the owner typed while the request was in flight.
   const formRef = useRef(form)
@@ -277,9 +292,14 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
             </div>
           </details>
 
-          <details className="border border-line">
+          <details
+            id="publication-settings"
+            className="border border-line"
+            open={publicationOpen}
+            onToggle={event => setPublicationOpen(event.currentTarget.open)}
+          >
             <summary className="label cursor-pointer select-none px-4 py-3 text-dim transition-colors hover:text-foreground">
-              Settings
+              Publication and lifecycle
               <span className="ml-3 font-normal normal-case tracking-normal text-dim">Lifecycle status and public profile visibility</span>
             </summary>
             <div className="grid gap-5 border-t border-line p-5 md:grid-cols-2">

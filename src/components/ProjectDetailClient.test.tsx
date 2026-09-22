@@ -1,72 +1,43 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, expect, it, vi } from 'vitest'
 import ProjectDetailClient from './ProjectDetailClient'
-import type { Project } from '@/types'
-
-const database = vi.hoisted(() => ({ eq: vi.fn(), single: vi.fn(), insert: vi.fn(), update: vi.fn(), delete: vi.fn() }))
-vi.mock('@supabase/ssr', () => ({
-  createBrowserClient: () => ({ from: () => ({
-    update: database.update,
-    delete: database.delete,
-    insert: database.insert,
-  }) }),
-}))
+import type { Project, ProjectBrief } from '@/types'
 
 const project: Project = {
   id: 'p1', user_id: 'u1', github_repo_id: 1, name: 'Example', full_name: 'owner/Example',
   description: null, html_url: 'https://github.com/owner/Example', language: null,
-  homepage: null, stargazers_count: 0, pushed_at: null, summary: null, technologies: [],
+  homepage: null, stargazers_count: 0, pushed_at: null, technologies: [],
   is_private: false, ai_opt_in: false, github_created_at: null,
   github_fork: false, github_owner_login: 'owner', github_owner_type: 'User',
   has_code_map: false, created_at: '2026-01-01', updated_at: '2026-01-01',
 }
 
-beforeEach(() => {
-  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co')
-  vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'test-key')
-  database.eq.mockResolvedValue({ error: null })
-  database.update.mockReturnValue({ eq: database.eq })
-  database.delete.mockReturnValue({ eq: database.eq })
-  database.insert.mockReturnValue({ select: () => ({ single: database.single }) })
-})
 afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
-it('exposes completion state and named delete controls', async () => {
-  render(<ProjectDetailClient project={project}
-    initialMilestones={[{ id: 'm1', project_id: 'p1', title: 'Release', status: 'pending', created_at: '' }]}
-    initialTodos={[{ id: 't1', project_id: 'p1', task: 'Write docs', is_completed: false, created_at: '' }]} />)
-  const milestone = screen.getByRole('button', { name: 'Complete milestone: Release' })
-  const task = screen.getByRole('button', { name: 'Complete task: Write docs' })
-  expect(milestone).toHaveAttribute('aria-pressed', 'false')
-  expect(task).toHaveAttribute('aria-pressed', 'false')
-  fireEvent.click(milestone)
-  fireEvent.click(task)
-  await waitFor(() => {
-    expect(milestone).toHaveAttribute('aria-pressed', 'true')
-    expect(task).toHaveAttribute('aria-pressed', 'true')
-  })
-  fireEvent.click(task)
-  await waitFor(() => expect(task).toHaveAttribute('aria-pressed', 'false'))
-  const remove = screen.getByRole('button', { name: 'Delete task: Write docs' })
-  remove.focus()
-  expect(remove).toHaveFocus()
-  fireEvent.click(remove)
-  expect(await screen.findByText('No tasks yet.')).toBeInTheDocument()
+it('places the project brief immediately after the repository header and before the AI evidence disclosure', () => {
+  const { container } = render(<ProjectDetailClient project={project} />)
+  const brief = screen.getByRole('region', { name: 'Project brief' })
+  const evidence = container.querySelector('#ai-evidence')
+  expect(evidence).not.toBeNull()
+  expect(evidence).toHaveTextContent('AI evidence')
+  expect(brief.compareDocumentPosition(evidence!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(screen.queryByText(/Legacy tasks and milestones/)).not.toBeInTheDocument()
 })
 
-it('does not offer legacy tasks or milestones to projects without existing records', () => {
-  render(<ProjectDetailClient project={project} initialMilestones={[]} initialTodos={[]} />)
-  expect(screen.queryByRole('form', { name: 'Add task' })).not.toBeInTheDocument()
-  expect(screen.queryByRole('form', { name: 'Add milestone' })).not.toBeInTheDocument()
-  expect(screen.queryByText(/Legacy tasks and milestones/)).not.toBeInTheDocument()
-  expect(screen.getByRole('form', { name: 'Edit project brief' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Ask about Example' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Index README' })).toBeInTheDocument()
+it('reports evidence status in the AI evidence summary', () => {
+  const first = render(<ProjectDetailClient project={project} />)
+  expect(first.container.querySelector('#ai-evidence')).toHaveTextContent('README evidence not indexed')
+  first.unmount()
+  const indexed = render(<ProjectDetailClient project={{ ...project, pushed_at: '2026-01-01' }} readmeIndexExists readmeIndexedPushedAt="2026-01-01" />)
+  expect(indexed.container.querySelector('#ai-evidence')).toHaveTextContent('README evidence indexed')
+  indexed.unmount()
+  const stale = render(<ProjectDetailClient project={{ ...project, pushed_at: '2026-02-01' }} readmeIndexExists readmeIndexedPushedAt="2026-01-01" />)
+  expect(stale.container.querySelector('#ai-evidence')).toHaveTextContent('indexed but stale')
 })
 
 it('indexes the README through the project endpoint and reports the result', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ indexed: true }) }))
-  render(<ProjectDetailClient project={project} initialMilestones={[]} initialTodos={[]} />)
+  render(<ProjectDetailClient project={project} />)
   fireEvent.click(screen.getByRole('button', { name: 'Index README' }))
   expect(await screen.findByRole('status')).toHaveTextContent('README indexed for chat and briefings.')
   expect(fetch).toHaveBeenCalledWith('/api/projects/p1/index', { method: 'POST' })
@@ -75,7 +46,8 @@ it('indexes the README through the project endpoint and reports the result', asy
 it('gates AI processing behind explicit consent on private repositories', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ aiOptIn: true }) }))
   const privateProject = { ...project, is_private: true }
-  render(<ProjectDetailClient project={privateProject} initialMilestones={[]} initialTodos={[]} />)
+  const { container } = render(<ProjectDetailClient project={privateProject} />)
+  expect(container.querySelector('#ai-evidence')).toHaveTextContent('AI processing off for this private repository')
   expect(screen.getByText('Private repository')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Index README' })).toBeDisabled()
   expect(screen.queryByRole('button', { name: 'Ask about Example' })).not.toBeInTheDocument()
@@ -88,24 +60,34 @@ it('gates AI processing behind explicit consent on private repositories', async 
   expect(screen.getByRole('button', { name: 'Ask about Example' })).toBeInTheDocument()
 })
 
-it('disables brief editing when the saved brief could not be loaded', () => {
-  render(<ProjectDetailClient project={project} briefLoadFailed initialMilestones={[]} initialTodos={[]} />)
-  expect(screen.queryByRole('form', { name: 'Edit project brief' })).not.toBeInTheDocument()
-  expect(screen.getByText(/editing is disabled to protect your saved content/)).toBeInTheDocument()
+const savedBrief: ProjectBrief = {
+  project_id: 'p1', visibility: 'private', lifecycle_status: null, purpose: null,
+  inspiration: null, role_and_contributions: null, architecture_and_decisions: null,
+  challenges_and_solutions: null, outcomes_and_impact: null, lessons_learned: null,
+  interview_talking_points: null, published_fields: [], owner_verified_at: null,
+  last_reviewed_at: null, ai_draft: {}, ai_draft_generated_at: null,
+  created_at: '2026-01-01', updated_at: '2026-01-01',
+}
+
+it('does not toggle AI consent when the brief is edited', async () => {
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ brief: savedBrief }) })
+  vi.stubGlobal('fetch', fetchMock)
+  const privateProject = { ...project, is_private: true }
+  render(<ProjectDetailClient project={privateProject} />)
+  fireEvent.change(screen.getByRole('textbox', { name: 'Purpose' }), { target: { value: 'Interview context' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Edit project brief' }))
+  await screen.findByRole('status')
+  expect(screen.getByRole('button', { name: 'Enable AI processing' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Ask about Example' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Index README' })).toBeDisabled()
 })
 
-it('submits named task and milestone forms for projects with existing legacy records', async () => {
-  render(<ProjectDetailClient project={project} initialMilestones={[]}
-    initialTodos={[{ id: 't1', project_id: 'p1', task: 'Write docs', is_completed: false, created_at: '' }]} />)
-  expect(screen.getByText(/Legacy tasks and milestones/)).toBeInTheDocument()
-  database.single.mockResolvedValueOnce({ data: { id: 't2', task: 'Test app', is_completed: false } })
-  fireEvent.change(screen.getByRole('textbox', { name: 'New task' }), { target: { value: 'Test app' } })
-  fireEvent.submit(screen.getByRole('form', { name: 'Add task' }))
-  expect(await screen.findByRole('button', { name: 'Complete task: Test app' })).toHaveAttribute('aria-pressed', 'false')
-  expect(screen.getByRole('textbox', { name: 'New task' })).toHaveValue('')
-  database.single.mockResolvedValueOnce({ data: { id: 'm2', title: 'Launch', status: 'pending' } })
-  const form = screen.getByRole('form', { name: 'Add milestone' })
-  fireEvent.change(within(form).getByRole('textbox', { name: 'New milestone' }), { target: { value: 'Launch' } })
-  fireEvent.submit(form)
-  expect(await screen.findByRole('button', { name: 'Complete milestone: Launch' })).toHaveAttribute('aria-pressed', 'false')
+it('disables brief editing when the saved brief could not be loaded', () => {
+  render(<ProjectDetailClient project={project} briefLoadFailed />)
+  expect(screen.queryByRole('form', { name: 'Edit project brief' })).not.toBeInTheDocument()
+  expect(screen.getByText(/editing is disabled to protect your saved content/)).toBeInTheDocument()
+  const brief = screen.getByRole('region', { name: 'Project brief' })
+  const evidence = screen.getByText('AI evidence').closest('details')
+  expect(evidence).toHaveAttribute('id', 'ai-evidence')
+  expect(brief.compareDocumentPosition(evidence!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })

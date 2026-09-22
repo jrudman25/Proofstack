@@ -57,6 +57,20 @@ export async function PATCH(request: Request) {
       if (!existing?.public_slug) throw new ApiError(400, 'Choose a profile URL before publishing')
     }
 
+    if (body.published === true) {
+      const { data: publishedRows, error: publicationError } = await auth.supabase.from('project_briefs')
+        .select('published_fields, projects!inner(user_id, is_private)')
+        .eq('projects.user_id', auth.userId)
+        .eq('projects.is_private', false)
+        .eq('visibility', 'public')
+        .limit(500)
+      if (publicationError) throw new ApiError(503, 'Service temporarily unavailable')
+      const hasPublishedField = (publishedRows || []).some(
+        (row: { published_fields?: unknown }) => Array.isArray(row.published_fields) && row.published_fields.length > 0
+      )
+      if (!hasPublishedField) throw new ApiError(400, 'Select at least one public project field before publishing')
+    }
+
     const { data: profile, error } = await auth.supabase.from('profiles')
       .update(update).eq('id', auth.userId).select(PROFILE_FIELDS).maybeSingle()
     if (error) {

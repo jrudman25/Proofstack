@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useMemo, useEffect, useEffectEvent } from 'react'
+import { useState, useMemo, useEffect, useEffectEvent, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { DashboardProject, StoredBriefing } from '@/types'
-import { RefreshCw, Star, LogOut, Lock, Settings } from 'lucide-react'
+import { Check, RefreshCw, Star, LogOut, Lock, Settings } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/GithubIcon'
 import { TechBrandIcon, techBrandMark } from '@/components/icons/TechBrandIcon'
 import { Logo } from '@/components/icons/Logo'
@@ -208,6 +208,10 @@ const stackTechnologies = (project: DashboardProject) => {
 // re-sync and import the newly visible private repositories.
 const CONNECT_PRIVATE_PENDING = 'proofstack:connect-private'
 
+const ONBOARDING_PROJECT_OPENED = 'proofstack:onboarding-project-opened'
+const ONBOARDING_DISMISSED = 'proofstack:onboarding-dismissed'
+const noopSubscribe = () => () => {}
+
 const SORTS = [
   { key: 'updated', label: 'Recently Updated' },
   { key: 'stars', label: 'Most Stars' },
@@ -259,6 +263,19 @@ export default function Dashboard({
   const [syncMessage, setSyncMessage] = useState('')
   const [connectMessage, setConnectMessage] = useState('')
   const [connectPending, setConnectPending] = useState(false)
+  const [projectOpened, setProjectOpened] = useState(false)
+  const [gettingStartedDismissed, setGettingStartedDismissed] = useState(false)
+  const [briefingGenerated, setBriefingGenerated] = useState(false)
+  const storedProjectOpened = useSyncExternalStore(
+    noopSubscribe,
+    () => localStorage.getItem(ONBOARDING_PROJECT_OPENED) === '1',
+    () => false,
+  )
+  const storedDismissed = useSyncExternalStore(
+    noopSubscribe,
+    () => localStorage.getItem(ONBOARDING_DISMISSED) === '1',
+    () => false,
+  )
 
   const handleSync = async (connectPrivate = false) => {
     setIsSyncing(true)
@@ -298,6 +315,16 @@ export default function Dashboard({
       queueMicrotask(() => void resumePrivateSync())
     }
   }, [])
+
+  const recordProjectOpened = () => {
+    setProjectOpened(true)
+    localStorage.setItem(ONBOARDING_PROJECT_OPENED, '1')
+  }
+
+  const dismissGettingStarted = () => {
+    setGettingStartedDismissed(true)
+    localStorage.setItem(ONBOARDING_DISMISSED, '1')
+  }
 
   // Upgrades the GitHub grant from public_repo to repo so private
   // repositories can be imported; the user returns to the dashboard.
@@ -361,6 +388,9 @@ export default function Dashboard({
   const pageStart = (displayedPage - 1) * PROJECTS_PER_PAGE + 1
   const pageEnd = Math.min(displayedPage * PROJECTS_PER_PAGE, filteredAndSorted.length)
 
+  const contextReady = projectOpened || storedProjectOpened || projects.some(project => project.brief)
+  const briefingReady = Boolean(initialBriefing) || briefingGenerated
+
   return (
     <div className="min-h-screen font-sans">
       <header className="sticky top-0 z-40 border-b border-line bg-ink/90 backdrop-blur-md">
@@ -388,17 +418,21 @@ export default function Dashboard({
               )}
               <Link
                 href="/account"
-                aria-label="Account settings"
-                className="p-1 text-dim transition-colors hover:text-foreground"
+                aria-label="Account"
+                title="Account"
+                className="flex h-10 w-10 items-center justify-center gap-2 text-dim transition-colors hover:text-foreground sm:w-auto sm:px-3"
               >
                 <Settings className="h-4 w-4" />
+                <span className="eyebrow hidden sm:inline">Account</span>
               </Link>
               <button
                 onClick={handleSignOut}
                 aria-label="Sign out"
-                className="p-1 text-dim transition-colors hover:text-foreground"
+                title="Sign out"
+                className="flex h-10 w-10 items-center justify-center gap-2 text-dim transition-colors hover:text-foreground sm:w-auto sm:px-3"
               >
                 <LogOut className="h-4 w-4" />
+                <span className="eyebrow hidden sm:inline">Sign out</span>
               </button>
             </div>
           )}
@@ -436,7 +470,66 @@ export default function Dashboard({
             {syncMessage && <p role="status" className="mt-4 font-mono text-[11px] text-dim">{syncMessage}</p>}
           </section>
         ) : !loadError ? (
-          <PortfolioBriefingPanel projectCount={projects.length} initial={initialBriefing} />
+          <>
+            {!gettingStartedDismissed && !storedDismissed && (
+              <section aria-labelledby="getting-started-heading" className="mt-6 border border-line bg-surface px-5 py-4 sm:px-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 id="getting-started-heading" className="label text-dim">Getting started</h2>
+                  <button
+                    type="button"
+                    onClick={dismissGettingStarted}
+                    className="eyebrow shrink-0 text-dim transition-colors hover:text-foreground"
+                  >
+                    Dismiss getting started
+                  </button>
+                </div>
+                <ol className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {[
+                    {
+                      title: 'Sync repositories',
+                      detail: `${projects.length} ${projects.length === 1 ? 'repository' : 'repositories'} imported from GitHub.`,
+                      done: projects.length > 0,
+                      action: null,
+                    },
+                    {
+                      title: 'Add project context',
+                      detail: 'Open a project to capture your role and decisions.',
+                      done: contextReady,
+                      action: (
+                        <Link
+                          href={`/project/${projects[0].id}`}
+                          onClick={recordProjectOpened}
+                          className="eyebrow mt-2 inline-block text-brand transition-colors hover:underline"
+                        >
+                          Open a project
+                        </Link>
+                      ),
+                    },
+                    {
+                      title: 'Prepare a briefing',
+                      detail: 'Generate themes, spotlights, and practice questions.',
+                      done: briefingReady,
+                      action: (
+                        <a href="#interview-briefing" className="eyebrow mt-2 inline-block text-brand transition-colors hover:underline">
+                          Go to briefing
+                        </a>
+                      ),
+                    },
+                  ].map((step, index) => (
+                    <li key={step.title} className="border-l border-line-bright pl-3">
+                      <span className={`eyebrow flex items-center gap-1.5 ${step.done ? 'text-brand' : 'text-dim'}`}>
+                        {step.done ? <><Check className="h-3 w-3" /> Done</> : `0${index + 1}`}
+                      </span>
+                      <span className="mt-1 block text-sm font-medium text-foreground">{step.title}</span>
+                      <span className="mt-1 block text-xs leading-relaxed text-dim">{step.detail}</span>
+                      {!step.done && step.action}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
+            <PortfolioBriefingPanel projectCount={projects.length} initial={initialBriefing} onGenerated={() => setBriefingGenerated(true)} />
+          </>
         ) : null}
 
         {projects.length > 0 && <section id="projects" aria-labelledby="projects-heading" className="mt-6 scroll-mt-20 border-b border-line pb-4">
@@ -594,6 +687,7 @@ export default function Dashboard({
                     the GitHub link remain hoverable. */}
                 <Link
                   href={`/project/${project.id}`}
+                  onClick={recordProjectOpened}
                   className="text-lg font-semibold tracking-tight transition-colors after:absolute after:inset-x-0 after:top-0 after:bottom-14 hover:text-brand"
                 >
                   {project.name}
@@ -667,7 +761,16 @@ export default function Dashboard({
               <span className="font-mono text-[11px] text-dim">
                 Showing {pageStart}–{pageEnd} of {filteredAndSorted.length}
               </span>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="eyebrow"
+                  disabled={displayedPage === 1}
+                  onClick={() => setProjectPage(1)}
+                >
+                  First
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -688,6 +791,15 @@ export default function Dashboard({
                   onClick={() => setProjectPage(Math.min(totalPages, displayedPage + 1))}
                 >
                   Next
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="eyebrow"
+                  disabled={displayedPage === totalPages}
+                  onClick={() => setProjectPage(totalPages)}
+                >
+                  Last
                 </Button>
               </div>
             </nav>

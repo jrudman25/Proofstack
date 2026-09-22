@@ -4,6 +4,7 @@ import { PATCH } from './route'
 const io = vi.hoisted(() => ({
   getUser: vi.fn(), from: vi.fn(), eval: vi.fn(),
   briefingSingle: vi.fn(), slugSingle: vi.fn(), updateSingle: vi.fn(), update: vi.fn(),
+  publicationEqs: [] as [string, unknown][], publishedFieldsLimit: vi.fn(),
 }))
 vi.mock('next/headers', () => ({ cookies: async () => ({ getAll: () => [], set: vi.fn() }) }))
 vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth: { getUser: io.getUser }, from: io.from }) }))
@@ -37,9 +38,19 @@ beforeEach(() => {
   io.slugSingle.mockResolvedValue({ data: { public_slug: 'octocat' }, error: null })
   io.updateSingle.mockResolvedValue({ data: profileResult, error: null })
   io.update.mockReturnValue({ eq: () => ({ select: () => ({ maybeSingle: io.updateSingle }) }) })
-  io.from.mockImplementation((table: string) => table === 'portfolio_briefings'
-    ? { select: () => ({ eq: () => ({ maybeSingle: io.briefingSingle }) }) }
-    : { select: () => ({ eq: () => ({ maybeSingle: io.slugSingle }) }), update: io.update })
+  io.publicationEqs = []
+  io.publishedFieldsLimit.mockResolvedValue({ data: [{ published_fields: ['purpose'] }], error: null })
+  io.from.mockImplementation((table: string) => {
+    if (table === 'portfolio_briefings') return { select: () => ({ eq: () => ({ maybeSingle: io.briefingSingle }) }) }
+    if (table === 'project_briefs') {
+      const eq = (...args: unknown[]) => {
+        io.publicationEqs.push(args as [string, unknown])
+        return { eq, limit: io.publishedFieldsLimit }
+      }
+      return { select: () => ({ eq }) }
+    }
+    return { select: () => ({ eq: () => ({ maybeSingle: io.slugSingle }) }), update: io.update }
+  })
 })
 afterEach(() => vi.unstubAllEnvs())
 
@@ -91,6 +102,43 @@ it('refuses to publish without any slug', async () => {
   const response = await PATCH(patch({ published: true }))
   expect(response.status).toBe(400)
   expect(io.update).not.toHaveBeenCalled()
+})
+
+it('requires at least one public project field before publishing', async () => {
+  io.publishedFieldsLimit.mockResolvedValue({ data: [], error: null })
+  const response = await PATCH(patch({ published: true }))
+  expect(response.status).toBe(400)
+  expect(await response.json()).toEqual({ error: 'Select at least one public project field before publishing' })
+  expect(io.update).not.toHaveBeenCalled()
+})
+
+it('treats public selections with no checked fields as unpublished', async () => {
+  io.publishedFieldsLimit.mockResolvedValue({ data: [{ published_fields: [] }, { published_fields: null }], error: null })
+  const response = await PATCH(patch({ published: true }))
+  expect(response.status).toBe(400)
+  expect(io.update).not.toHaveBeenCalled()
+})
+
+it('scopes the publication check to the owner’s public selected briefs', async () => {
+  const response = await PATCH(patch({ published: true }))
+  expect(response.status).toBe(200)
+  expect(io.publicationEqs).toContainEqual(['projects.user_id', userId])
+  expect(io.publicationEqs).toContainEqual(['projects.is_private', false])
+  expect(io.publicationEqs).toContainEqual(['visibility', 'public'])
+})
+
+it('sanitizes publication check failures', async () => {
+  io.publishedFieldsLimit.mockResolvedValue({ data: null, error: new Error('secret database details') })
+  const response = await PATCH(patch({ published: true }))
+  expect(response.status).toBe(503)
+  expect(await response.text()).not.toContain('secret database details')
+  expect(io.update).not.toHaveBeenCalled()
+})
+
+it('unpublishes without a publication check', async () => {
+  const response = await PATCH(patch({ published: false }))
+  expect(response.status).toBe(200)
+  expect(io.publishedFieldsLimit).not.toHaveBeenCalled()
 })
 
 it('unpublishes without deleting the stored slug or briefing snapshot', async () => {

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import Dashboard from './Dashboard'
-import type { DashboardProject } from '@/types'
+import type { DashboardProject, PortfolioBriefing } from '@/types'
 
 const refresh = vi.fn()
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
@@ -24,7 +24,17 @@ const project: DashboardProject = {
   brief: null,
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); refresh.mockClear(); io.signInWithOAuth.mockClear(); sessionStorage.clear() })
+const briefing: PortfolioBriefing = {
+  summary: 'A portfolio focused on web engineering.',
+  themes: [{ title: 'Web engineering', detail: 'Uses typed application stacks.', projectIds: ['p1'] }],
+  spotlights: [{ projectId: 'p1', reason: 'Shows system design.', talkingPoints: ['Explain the architecture.'] }],
+  growth: 'The projects show increasing scope.',
+  evidenceGaps: ['Add measurable outcomes.'],
+  interviewQuestions: ['Why did you choose this architecture?'],
+  citations: [{ projectId: 'p1', name: 'Example', url: 'https://github.com/owner/Example', evidence: ['github'] }],
+}
+
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); refresh.mockClear(); io.signInWithOAuth.mockClear(); sessionStorage.clear(); localStorage.clear() })
 
 it('names search and GitHub links and exposes selected sorting', () => {
   render(<Dashboard initialProjects={[project]} />)
@@ -162,15 +172,92 @@ it('gives an empty portfolio one guided first-run action', () => {
   expect(screen.queryByRole('textbox', { name: 'Search projects and technologies' })).not.toBeInTheDocument()
 })
 
-it('shows the briefing and project tools after repositories are imported', () => {
+it('replaces the first-run panel with a getting started checklist after repositories are imported', () => {
   const { rerender } = render(<Dashboard initialProjects={[]} />)
   expect(screen.getByRole('heading', { name: 'Build your first interview briefing' })).toBeInTheDocument()
   rerender(<Dashboard initialProjects={[project]} lastSyncedAt="2026-03-04T10:00:00.000Z" />)
   expect(screen.queryByRole('heading', { name: 'Build your first interview briefing' })).not.toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Getting started' })).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Example' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeEnabled()
   expect(screen.getByText('Synced 2026-03-04')).toBeInTheDocument()
   expect(screen.getByRole('textbox', { name: 'Search projects and technologies' })).toBeInTheDocument()
+})
+
+const checklist = () => within(screen.getByRole('region', { name: 'Getting started' }))
+
+it('shows sync as done and links the remaining checklist steps', () => {
+  render(<Dashboard initialProjects={[project]} />)
+  const steps = checklist().getAllByRole('listitem')
+  expect(steps).toHaveLength(3)
+  expect(steps[0]).toHaveTextContent('Sync repositories')
+  expect(steps[0]).toHaveTextContent('Done')
+  expect(steps[1]).toHaveTextContent('Add project context')
+  expect(steps[1]).not.toHaveTextContent('Done')
+  expect(within(steps[1]).getByRole('link', { name: 'Open a project' })).toHaveAttribute('href', '/project/p1')
+  expect(steps[2]).toHaveTextContent('Prepare a briefing')
+  expect(steps[2]).not.toHaveTextContent('Done')
+  expect(within(steps[2]).getByRole('link', { name: 'Go to briefing' })).toHaveAttribute('href', '#interview-briefing')
+})
+
+it('marks the context step done when a project already has a brief', () => {
+  render(<Dashboard initialProjects={[{ ...project, brief: { purpose: 'Notes', lifecycle_status: null, owner_verified_at: null } }]} />)
+  expect(checklist().getAllByRole('listitem')[1]).toHaveTextContent('Done')
+})
+
+it('marks the context step done after a project card is opened and persists it', () => {
+  render(<Dashboard initialProjects={[project]} />)
+  fireEvent.click(screen.getByRole('link', { name: 'Example' }))
+  expect(localStorage.getItem('proofstack:onboarding-project-opened')).toBe('1')
+  expect(checklist().getAllByRole('listitem')[1]).toHaveTextContent('Done')
+})
+
+it('marks the briefing step done when a briefing exists and after generating one', async () => {
+  const { unmount } = render(<Dashboard initialProjects={[project]} initialBriefing={{ briefing, generatedAt: '2026-09-10T00:00:00.000Z', changedCount: 0 }} />)
+  expect(checklist().getAllByRole('listitem')[2]).toHaveTextContent('Done')
+  unmount()
+
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ briefing, generatedAt: '2026-09-21T00:00:00.000Z' }) }))
+  render(<Dashboard initialProjects={[project]} />)
+  expect(checklist().getAllByRole('listitem')[2]).not.toHaveTextContent('Done')
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare briefing' }))
+  expect(await screen.findByText(briefing.summary)).toBeInTheDocument()
+  expect(checklist().getAllByRole('listitem')[2]).toHaveTextContent('Done')
+})
+
+it('dismisses the checklist at any stage and keeps it dismissed', () => {
+  const { rerender } = render(<Dashboard initialProjects={[project]} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss getting started' }))
+  expect(localStorage.getItem('proofstack:onboarding-dismissed')).toBe('1')
+  expect(screen.queryByRole('heading', { name: 'Getting started' })).not.toBeInTheDocument()
+  rerender(<Dashboard initialProjects={[project]} />)
+  expect(screen.queryByRole('heading', { name: 'Getting started' })).not.toBeInTheDocument()
+})
+
+it('honors stored onboarding flags and never shows a checklist on load failure', () => {
+  localStorage.setItem('proofstack:onboarding-dismissed', '1')
+  localStorage.setItem('proofstack:onboarding-project-opened', '1')
+  const { unmount } = render(<Dashboard initialProjects={[project]} />)
+  expect(screen.queryByRole('heading', { name: 'Getting started' })).not.toBeInTheDocument()
+  unmount()
+  localStorage.clear()
+  render(<Dashboard initialProjects={[]} loadError />)
+  expect(screen.queryByRole('heading', { name: 'Getting started' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Build your first interview briefing' })).not.toBeInTheDocument()
+})
+
+it('gives the header account and sign-out controls 40px targets with labeled names', () => {
+  render(<Dashboard initialProjects={[project]} user={{ handle: 'octocat', displayName: null, avatarUrl: null }} />)
+  const account = screen.getByRole('link', { name: 'Account' })
+  const signOut = screen.getByRole('button', { name: 'Sign out' })
+  for (const control of [account, signOut]) {
+    expect(control).toHaveClass('h-10')
+    expect(control).toHaveClass('w-10')
+  }
+  expect(within(account).getByText('Account')).toHaveClass('hidden')
+  expect(within(signOut).getByText('Sign out')).toHaveClass('hidden')
+  signOut.focus()
+  expect(signOut).toHaveFocus()
 })
 
 it('refreshes server data after a successful sync and reports the count', async () => {
@@ -223,20 +310,66 @@ it('paginates the filtered project grid twelve cards per page', () => {
   expect(screen.queryByRole('link', { name: 'Project 13' })).not.toBeInTheDocument()
   expect(pages()).toHaveTextContent('Showing 1–12 of 13')
   expect(pages()).toHaveTextContent('Page 1 of 2')
+  expect(within(pages()).getByRole('button', { name: 'First' })).toBeDisabled()
   expect(within(pages()).getByRole('button', { name: 'Previous' })).toBeDisabled()
   expect(within(pages()).getByRole('button', { name: 'Next' })).toBeEnabled()
+  expect(within(pages()).getByRole('button', { name: 'Last' })).toBeEnabled()
 
-  fireEvent.click(within(pages()).getByRole('button', { name: 'Next' }))
+  fireEvent.click(within(pages()).getByRole('button', { name: 'Last' }))
   expect(screen.getByRole('link', { name: 'Project 13' })).toBeInTheDocument()
   expect(screen.queryByRole('link', { name: 'Project 1' })).not.toBeInTheDocument()
   expect(pages()).toHaveTextContent('Showing 13–13 of 13')
   expect(pages()).toHaveTextContent('Page 2 of 2')
   expect(within(pages()).getByRole('button', { name: 'Next' })).toBeDisabled()
+  expect(within(pages()).getByRole('button', { name: 'Last' })).toBeDisabled()
 
   fireEvent.click(within(pages()).getByRole('button', { name: 'Previous' }))
+  expect(pages()).toHaveTextContent('Page 1 of 2')
+  expect(screen.getByRole('link', { name: 'Project 1' })).toBeInTheDocument()
+
+  fireEvent.click(within(pages()).getByRole('button', { name: 'Next' }))
+  expect(pages()).toHaveTextContent('Page 2 of 2')
+  expect(screen.getByRole('link', { name: 'Project 13' })).toBeInTheDocument()
+
+  fireEvent.click(within(pages()).getByRole('button', { name: 'First' }))
   expect(screen.getByRole('link', { name: 'Project 1' })).toBeInTheDocument()
   expect(screen.queryByRole('link', { name: 'Project 13' })).not.toBeInTheDocument()
   expect(pages()).toHaveTextContent('Page 1 of 2')
+  expect(within(pages()).getByRole('button', { name: 'First' })).toBeDisabled()
+  expect(within(pages()).getByRole('button', { name: 'Previous' })).toBeDisabled()
+})
+
+const twentyFiveProjects: DashboardProject[] = Array.from({ length: 25 }, (_, i) => ({
+  ...project,
+  id: `p${i + 1}`,
+  name: `Project ${i + 1}`,
+  full_name: `owner/Project-${i + 1}`,
+  html_url: `https://github.com/owner/Project-${i + 1}`,
+  updated_at: `2026-03-${String(25 - i).padStart(2, '0')}T10:00:00.000Z`,
+}))
+
+it('jumps between the first and last page without stepping through pages', () => {
+  render(<Dashboard initialProjects={twentyFiveProjects} />)
+  const pages = () => screen.getByRole('navigation', { name: 'Project pages' })
+
+  expect(pages()).toHaveTextContent('Showing 1–12 of 25')
+  expect(pages()).toHaveTextContent('Page 1 of 3')
+
+  fireEvent.click(within(pages()).getByRole('button', { name: 'Last' }))
+  expect(pages()).toHaveTextContent('Showing 25–25 of 25')
+  expect(pages()).toHaveTextContent('Page 3 of 3')
+  expect(screen.getByRole('link', { name: 'Project 25' })).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Project 13' })).not.toBeInTheDocument()
+  expect(within(pages()).getByRole('button', { name: 'Next' })).toBeDisabled()
+  expect(within(pages()).getByRole('button', { name: 'Last' })).toBeDisabled()
+
+  fireEvent.click(within(pages()).getByRole('button', { name: 'First' }))
+  expect(pages()).toHaveTextContent('Showing 1–12 of 25')
+  expect(pages()).toHaveTextContent('Page 1 of 3')
+  expect(screen.getByRole('link', { name: 'Project 1' })).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Project 13' })).not.toBeInTheDocument()
+  expect(within(pages()).getByRole('button', { name: 'First' })).toBeDisabled()
+  expect(within(pages()).getByRole('button', { name: 'Previous' })).toBeDisabled()
 })
 
 it('resets to the first page when search, sort, or visibility changes', () => {

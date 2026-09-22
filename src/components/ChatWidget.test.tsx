@@ -127,6 +127,25 @@ it('labels the portfolio launcher and fills the input from a prompt starter with
   expect(fetchMock).not.toHaveBeenCalled()
 })
 
+it('keeps header controls at least 40px with pointer titles and the launcher at 48px', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ content: 'Answer' }) }))
+  render(<ChatWidget />)
+  const launcher = screen.getByRole('button', { name: 'Ask about your portfolio' })
+  expect(launcher).toHaveClass('h-12')
+  fireEvent.click(launcher)
+  const close = screen.getByRole('button', { name: 'Close chat' })
+  expect(close).toHaveClass('h-10')
+  expect(close).toHaveClass('w-10')
+  expect(close).toHaveAttribute('title', 'Close chat')
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Question' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Send chat message' }))
+  expect(await screen.findByText('Answer')).toBeInTheDocument()
+  const restart = screen.getByRole('button', { name: 'Start a new conversation' })
+  expect(restart).toHaveClass('h-10')
+  expect(restart).toHaveClass('w-10')
+  expect(restart).toHaveAttribute('title', 'New conversation')
+})
+
 it('shows project-scoped prompt starters instead of portfolio ones', () => {
   render(<ChatWidget projectId="22345678-1234-1234-1234-123456789abc" projectName="Example" />)
   fireEvent.click(screen.getByRole('button', { name: 'Ask about Example' }))

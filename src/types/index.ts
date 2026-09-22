@@ -16,7 +16,6 @@ export type Project = {
   github_fork: boolean
   github_owner_login: string | null
   github_owner_type: 'User' | 'Organization' | null
-  summary: string | null
   technologies: string[]
   has_code_map: boolean
   created_at: string
@@ -49,9 +48,9 @@ export type ProjectBrief = {
 // The subset of owner-authored brief fields surfaced on dashboard cards.
 export type ProjectBriefSummary = Pick<ProjectBrief, 'purpose' | 'lifecycle_status' | 'owner_verified_at'>
 
-// The dashboard needs no user_id, github_repo_id, has_code_map, or summary
-// columns; cards additionally carry the owner brief when one exists.
-export type DashboardProject = Omit<Project, 'user_id' | 'github_repo_id' | 'has_code_map' | 'summary'> & {
+// The dashboard needs no user_id, github_repo_id, or has_code_map columns;
+// cards additionally carry the owner brief when one exists.
+export type DashboardProject = Omit<Project, 'user_id' | 'github_repo_id' | 'has_code_map'> & {
   brief: ProjectBriefSummary | null
 }
 
@@ -122,20 +121,4 @@ export type PublicProfile = {
     ownerReviewed: boolean
     brief: Partial<Record<PublishableBriefField, string | null>>
   }[]
-}
-
-export type Todo = {
-  id: string
-  project_id: string
-  task: string
-  is_completed: boolean
-  created_at: string
-}
-
-export type Milestone = {
-  id: string
-  project_id: string
-  title: string
-  status: 'pending' | 'in_progress' | 'completed'
-  created_at: string
 }

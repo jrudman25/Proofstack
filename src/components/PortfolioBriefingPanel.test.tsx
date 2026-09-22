@@ -32,6 +32,25 @@ it('generates and presents a briefing with provenance labels and internal projec
   expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument()
 })
 
+it('notifies the parent after a successful generation but not after a failure', async () => {
+  const onGenerated = vi.fn()
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ briefing, generatedAt: '2026-09-21T00:00:00.000Z' }) })
+    .mockRejectedValueOnce(new Error('down')))
+  render(<PortfolioBriefingPanel projectCount={1} onGenerated={onGenerated} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare briefing' }))
+  expect(await screen.findByText(briefing.summary)).toBeInTheDocument()
+  expect(onGenerated).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('Unable to generate your briefing. Please try again.')
+  expect(onGenerated).toHaveBeenCalledOnce()
+})
+
+it('anchors the briefing section for onboarding deep links', () => {
+  const { container } = render(<PortfolioBriefingPanel projectCount={1} />)
+  expect(container.querySelector('#interview-briefing')).not.toBeNull()
+})
+
 it('keeps a persisted briefing compact until the user expands it', () => {
   render(<PortfolioBriefingPanel projectCount={2}
     initial={{ briefing, generatedAt: '2026-09-10T00:00:00.000Z', changedCount: 1 }} />)

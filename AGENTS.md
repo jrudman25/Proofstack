@@ -45,7 +45,7 @@ Do not expand Proofstack into:
 - A social network, recruiter CRM, or hiring marketplace
 - A real-time repository monitoring service
 
-Legacy task, milestone, summary-processing, and code-map structures require safe deprecation. Preserve existing data until a reviewed migration or export decision is made.
+Legacy task and milestone product UI and browser writes are retired. Retained rows are read-only and exposed only through the authenticated owner export at `GET /api/account/legacy-export`; do not restore writes or drop retained storage without a separately reviewed data migration/export decision. Generic README summary processing is retired; `supabase/migrations/20260921000000_retire_legacy_features.sql` preserves nonblank values in `project_briefs.ai_draft.legacyReadmeSummary` before dropping the column. Code-map structures still require deliberate deprecation.
 
 ## Current architecture
 
@@ -70,7 +70,7 @@ npm run build
 npm audit
 ```
 
-Run the checks relevant to the change. Database migration tests in this repository are static checks and do not replace execution against a local or staging PostgreSQL instance. Back up and test restoration before applying schema changes to existing data.
+Run the checks relevant to the change. Database migration tests in this repository are static checks and do not replace execution against a local or staging PostgreSQL instance. Back up and test restoration before applying schema changes to existing data. `supabase/migrations/20260921000000_retire_legacy_features.sql` contains a destructive column drop (`projects.summary`); back up and execute it against local or staging PostgreSQL before any production application. The hosted Proofstack instance has migration version `20260922041704` (`retire_legacy_features`) applied and verified.
 
 ## Planning
 

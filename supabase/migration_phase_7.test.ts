@@ -11,6 +11,7 @@ const definerMigration = sql('migrations/20260914000001_restrict_definer_functio
 const vectorMigration = sql('migrations/20260914000002_move_vector_extension.sql')
 const consentSerializationMigration = sql('migrations/20260916000000_serialize_ai_consent_embeddings.sql')
 const publicProfilesMigration = sql('migrations/20260920000000_public_profiles.sql')
+const retireMigration = sql('migrations/20260921000000_retire_legacy_features.sql')
 const setup = sql('setup.sql')
 const functions = sql('functions.sql')
 
@@ -107,6 +108,47 @@ it('adds public-profile publication state, field controls and repository relatio
   expect(publicProfilesMigration.indexOf('set public_slug = lower(github_username)')).toBeLessThan(publicProfilesMigration.indexOf('profiles_public_slug_format'))
 })
 
+it('retires legacy summaries and task writes while preserving stored rows', () => {
+  expect(retireMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
+  expect(retireMigration).not.toMatch(/\bdelete\s+from\b|\btruncate\b|\bdrop\s+table\b|\bdisable\s+row\s+level\s+security\b/)
+  expect(retireMigration).toContain('insert into public.project_briefs (project_id, ai_draft)')
+  expect(retireMigration).toContain("'legacyreadmesummary'")
+  expect(retireMigration).toContain("project_briefs.ai_draft ? 'legacyreadmesummary'")
+  expect(retireMigration).toContain('on conflict (project_id) do update')
+  expect(retireMigration).toContain('alter table public.projects drop column summary')
+  expect(retireMigration).toContain("project_briefs.ai_draft #>> '{legacyreadmesummary,content}' is distinct from projects.summary")
+  expect(retireMigration).toContain("raise exception 'legacy readme summary preservation failed'")
+  expect(retireMigration.indexOf("raise exception 'legacy readme summary preservation failed'")).toBeLessThan(retireMigration.indexOf('alter table public.projects drop column summary'))
+  for (const policy of [
+    'insert own project milestones', 'update own project milestones', 'delete own project milestones',
+    'insert own project todos', 'update own project todos', 'delete own project todos',
+  ]) {
+    expect(retireMigration).toContain(`drop policy if exists "users can ${policy}"`)
+  }
+  expect(retireMigration).toContain('revoke insert, update, delete on table public.milestones from authenticated')
+  expect(retireMigration).toContain('revoke insert, update, delete on table public.todos from authenticated')
+  expect(retireMigration).not.toContain('view own project milestones" on public.milestones')
+  expect(retireMigration).not.toContain('view own project todos" on public.todos')
+})
+it('keeps legacy tables readable but write-revoked in a fresh setup', () => {
+  expect(setup).toContain('create table milestones')
+  expect(setup).toContain('create table todos')
+  expect(setup).toContain('milestones_project_id_idx')
+  expect(setup).toContain('todos_project_id_idx')
+  expect(setup).toContain('alter table milestones enable row level security')
+  expect(setup).toContain('alter table todos enable row level security')
+  expect(setup).toContain('users can view own project milestones')
+  expect(setup).toContain('users can view own project todos')
+  for (const policy of [
+    'insert own project milestones', 'update own project milestones', 'delete own project milestones',
+    'insert own project todos', 'update own project todos', 'delete own project todos',
+  ]) {
+    expect(setup).not.toContain(`users can ${policy}`)
+  }
+  expect(setup).toContain('revoke insert, update, delete on table public.milestones from authenticated')
+  expect(setup).toContain('revoke insert, update, delete on table public.todos from authenticated')
+  expect(setup).not.toContain('summary text')
+})
 it('revokes browser-role execution from security definer functions', () => {
   expect(definerMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
   expect(definerMigration).toContain('revoke all on function public.handle_new_user() from public, anon, authenticated')

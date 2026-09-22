@@ -28,7 +28,7 @@ function ProjectLink({ projectId, name, url }: { projectId: string; name: string
   )
 }
 
-export default function PortfolioBriefingPanel({ projectCount, initial }: { projectCount?: number; initial?: StoredBriefing | null }) {
+export default function PortfolioBriefingPanel({ projectCount, initial, onGenerated }: { projectCount?: number; initial?: StoredBriefing | null; onGenerated?: () => void }) {
   const [briefing, setBriefing] = useState<PortfolioBriefing | null>(initial?.briefing ?? null)
   const [generatedAt, setGeneratedAt] = useState<string | null>(initial?.generatedAt ?? null)
   const [changedCount, setChangedCount] = useState(initial?.changedCount ?? 0)
@@ -52,6 +52,7 @@ export default function PortfolioBriefingPanel({ projectCount, initial }: { proj
       setGeneratedAt(typeof result.generatedAt === 'string' ? result.generatedAt : new Date().toISOString())
       setChangedCount(0)
       setIsExpanded(true)
+      onGenerated?.()
     } catch {
       setMessage('Unable to generate your briefing. Please try again.')
     } finally {
@@ -62,7 +63,7 @@ export default function PortfolioBriefingPanel({ projectCount, initial }: { proj
   const citation = (projectId: string) => briefing?.citations.find(item => item.projectId === projectId)
 
   return (
-    <section aria-labelledby="briefing-heading" className="corner-ticks relative mt-6 border border-line bg-surface">
+    <section id="interview-briefing" aria-labelledby="briefing-heading" className="corner-ticks relative mt-6 scroll-mt-20 border border-line bg-surface">
       <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
