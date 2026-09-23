@@ -19,7 +19,7 @@ export async function getProviderToken(context: Awaited<ReturnType<typeof authen
 
 export async function requireProject(context: Awaited<ReturnType<typeof authenticateUser>>, projectId: string) {
   const { data: project, error } = await context.supabase.from('projects')
-    .select('id, name, full_name, user_id, is_private, ai_opt_in, pushed_at').eq('id', projectId).eq('user_id', context.userId).maybeSingle()
+    .select('id, name, full_name, user_id, is_private, ai_opt_in, pushed_at').eq('id', projectId).eq('user_id', context.userId).is('github_deleted_at', null).maybeSingle()
   if (error) throw new ApiError(503, 'Service temporarily unavailable')
   if (!project || project.user_id !== context.userId) throw new ApiError(404, 'Project not found')
   return project

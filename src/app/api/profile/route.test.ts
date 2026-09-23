@@ -4,7 +4,7 @@ import { PATCH } from './route'
 const io = vi.hoisted(() => ({
   getUser: vi.fn(), from: vi.fn(), eval: vi.fn(),
   briefingSingle: vi.fn(), slugSingle: vi.fn(), updateSingle: vi.fn(), update: vi.fn(),
-  publicationEqs: [] as [string, unknown][], publishedFieldsLimit: vi.fn(),
+  publicationEqs: [] as [string, unknown][], publicationIs: [] as [string, unknown][], publishedFieldsLimit: vi.fn(),
 }))
 vi.mock('next/headers', () => ({ cookies: async () => ({ getAll: () => [], set: vi.fn() }) }))
 vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth: { getUser: io.getUser }, from: io.from }) }))
@@ -39,15 +39,21 @@ beforeEach(() => {
   io.updateSingle.mockResolvedValue({ data: profileResult, error: null })
   io.update.mockReturnValue({ eq: () => ({ select: () => ({ maybeSingle: io.updateSingle }) }) })
   io.publicationEqs = []
+  io.publicationIs = []
   io.publishedFieldsLimit.mockResolvedValue({ data: [{ published_fields: ['purpose'] }], error: null })
   io.from.mockImplementation((table: string) => {
     if (table === 'portfolio_briefings') return { select: () => ({ eq: () => ({ maybeSingle: io.briefingSingle }) }) }
     if (table === 'project_briefs') {
-      const eq = (...args: unknown[]) => {
+      const chain: Record<string, unknown> = { limit: io.publishedFieldsLimit }
+      chain.eq = (...args: unknown[]) => {
         io.publicationEqs.push(args as [string, unknown])
-        return { eq, limit: io.publishedFieldsLimit }
+        return chain
       }
-      return { select: () => ({ eq }) }
+      chain.is = (...args: unknown[]) => {
+        io.publicationIs.push(args as [string, unknown])
+        return chain
+      }
+      return { select: () => chain }
     }
     return { select: () => ({ eq: () => ({ maybeSingle: io.slugSingle }) }), update: io.update }
   })
@@ -125,6 +131,7 @@ it('scopes the publication check to the owner’s public selected briefs', async
   expect(response.status).toBe(200)
   expect(io.publicationEqs).toContainEqual(['projects.user_id', userId])
   expect(io.publicationEqs).toContainEqual(['projects.is_private', false])
+  expect(io.publicationIs).toContainEqual(['projects.github_deleted_at', null])
   expect(io.publicationEqs).toContainEqual(['visibility', 'public'])
 })
 

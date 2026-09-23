@@ -88,6 +88,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
     }
     if (event === 'ping') return NextResponse.json({ received: true })
+    if (event === 'repository' && typeof payload.action !== 'string') {
+      return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
+    }
     if (!isRepository(payload.repository)) {
       return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
     }
@@ -102,12 +105,22 @@ export async function POST(request: Request) {
       { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
     )
 
+    if (event === 'repository' && payload.action === 'deleted') {
+      const now = new Date().toISOString()
+      const { error } = await supabase.from('projects')
+        .update({ github_deleted_at: now, updated_at: now })
+        .eq('github_repo_id', repo.id)
+      if (error) throw error
+      return NextResponse.json({ received: true })
+    }
+
     // We need to find if this repo exists in our DB, and who it belongs to
     // Update existing project
     // Visibility and ownership fields matter as much as the metadata: a
     // repository made private on GitHub must drop off public profiles and AI
     // payloads immediately (the consent trigger removes its embeddings), not
-    // wait for the owner's next manual sync.
+    // wait for the owner's next manual sync. GitHub reporting the repository
+    // again also clears any tombstone.
     const { error } = await supabase.from('projects').update({
       name: repo.name,
       full_name: repo.full_name,
@@ -120,6 +133,7 @@ export async function POST(request: Request) {
       github_fork: repo.fork,
       github_owner_login: repo.owner.login,
       github_owner_type: repo.owner.type === 'User' || repo.owner.type === 'Organization' ? repo.owner.type : null,
+      github_deleted_at: null,
       updated_at: new Date().toISOString()
     }).eq('github_repo_id', repo.id)
     if (error) throw error

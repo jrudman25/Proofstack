@@ -63,7 +63,7 @@ beforeEach(() => {
   io.updateEq.mockImplementation(() => ({ eq: io.updateEq, select: () => ({ maybeSingle: io.writeSingle }) }))
   io.update.mockReturnValue({ eq: io.updateEq })
   io.insert.mockReturnValue({ select: () => ({ maybeSingle: io.writeSingle }) })
-  const projectQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: io.projectSingle }
+  const projectQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), is: vi.fn().mockReturnThis(), maybeSingle: io.projectSingle }
   const briefQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: io.briefSingle, update: io.update, insert: io.insert }
   io.from.mockImplementation((table: string) => table === 'projects' ? projectQuery : briefQuery)
 })

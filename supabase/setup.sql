@@ -51,6 +51,7 @@ create table projects (
   github_owner_type text check (github_owner_type is null or github_owner_type in ('User', 'Organization')),
   technologies text[] default '{}',
   has_code_map boolean default false,
+  github_deleted_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
   unique(user_id, github_repo_id)

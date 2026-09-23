@@ -155,6 +155,7 @@ describe('GitHub webhook database behavior', () => {
         stargazers_count: 7, pushed_at: repository.pushed_at,
         is_private: false, github_fork: false,
         github_owner_login: 'owner', github_owner_type: 'User',
+        github_deleted_at: null,
         updated_at: expect.any(String),
       })
       for (const row of rows) {
@@ -162,12 +163,15 @@ describe('GitHub webhook database behavior', () => {
       }
       return new Response(null, { status: 204 })
     })
-    const response = await POST(delivery(undefined, {
-      'x-github-event': event,
-      'content-type': 'application/json; charset=utf-8',
-      cookie: 'sb-access-token=user-token',
-      authorization: 'Bearer user-token',
-    }))
+    const response = await POST(delivery(
+      event === 'repository' ? JSON.stringify({ action: 'edited', repository }) : undefined,
+      {
+        'x-github-event': event,
+        'content-type': 'application/json; charset=utf-8',
+        cookie: 'sb-access-token=user-token',
+        authorization: 'Bearer user-token',
+      },
+    ))
     expect(response.status).toBe(200)
     expect(rows.map(row => row.name)).toEqual(['updated', 'updated', 'unrelated'])
     expect(rows.map(row => row.user_id)).toEqual(['alice', 'bob', 'alice'])
@@ -180,10 +184,59 @@ describe('GitHub webhook database behavior', () => {
       return new Response(null, { status: 204 })
     })
     const response = await POST(delivery(JSON.stringify({
+      action: 'privatized',
       repository: { ...repository, private: true },
     }), { 'x-github-event': 'repository' }))
     expect(response.status).toBe(200)
     expect(changes?.is_private).toBe(true)
+  })
+
+  it('tombstones the project rows when GitHub reports a repository deletion', async () => {
+    let changes: Record<string, unknown> | undefined
+    let filter = ''
+    network.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(input, init)
+      const url = new URL(request.url)
+      expect(url.pathname).toBe('/rest/v1/projects')
+      expect(request.method).toBe('PATCH')
+      filter = url.searchParams.get('github_repo_id') ?? ''
+      changes = await request.json()
+      return new Response(null, { status: 204 })
+    })
+    const response = await POST(delivery(JSON.stringify({ action: 'deleted', repository }), {
+      'x-github-event': 'repository',
+    }))
+    expect(response.status).toBe(200)
+    expect(Object.keys(changes!)).toEqual(['github_deleted_at', 'updated_at'])
+    expect(changes!.github_deleted_at).toBe(changes!.updated_at)
+    expect(filter).toBe('eq.42')
+  })
+
+  it('clears the tombstone when a repository event reports the project again', async () => {
+    let changes: Record<string, unknown> | undefined
+    network.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+      changes = await new Request(input, init).json()
+      return new Response(null, { status: 204 })
+    })
+    const response = await POST(delivery(JSON.stringify({ action: 'edited', repository }), {
+      'x-github-event': 'repository',
+    }))
+    expect(response.status).toBe(200)
+    expect(changes?.github_deleted_at).toBeNull()
+  })
+
+  it.each([42, { action: 'deleted' }, ['deleted'], true])('rejects a non-string repository action %p', async action => {
+    const response = await POST(delivery(JSON.stringify({ action, repository }), {
+      'x-github-event': 'repository',
+    }))
+    expect(response.status).toBe(400)
+    expect(network).not.toHaveBeenCalled()
+  })
+
+  it('rejects a repository event without an action', async () => {
+    const response = await POST(delivery(undefined, { 'x-github-event': 'repository' }))
+    expect(response.status).toBe(400)
+    expect(network).not.toHaveBeenCalled()
   })
 
   it('acknowledges an untracked repository with no returned rows', async () => {

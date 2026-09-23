@@ -14,7 +14,7 @@ const MAX_WORKSPACE_MANIFESTS = 12
 // large cold-cache portfolio cannot stall the whole import.
 const ENRICHMENT_BUDGET_MS = 45_000
 
-type ExistingProject = { github_repo_id: number; technologies: string[] | null }
+type ExistingProject = { github_repo_id: number; technologies: string[] | null; is_private: boolean }
 type IndexedRepo = GithubRepo & { technologies: string[] }
 
 async function fetchWorkspaceDependencies(owner: string, repo: string, files: string[] | null, identity: { userId: string; accessToken: string }) {
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
 
     const { data: existingProjects, error: existingError } = await supabase
       .from('projects')
-      .select('github_repo_id, technologies')
+      .select('github_repo_id, technologies, is_private')
       .eq('user_id', userId)
     if (existingError) throw existingError
     const existingTechnologies = new Map(((existingProjects || []) as ExistingProject[]).map(project => [
@@ -176,6 +176,7 @@ export async function POST(request: Request) {
         github_owner_login: repo.github_owner_login,
         github_owner_type: repo.github_owner_type,
         technologies: repo.technologies,
+        github_deleted_at: null,
         updated_at: new Date().toISOString(),
       })), {
         onConflict: 'user_id,github_repo_id'
@@ -183,6 +184,20 @@ export async function POST(request: Request) {
 
       if (error) throw error
       syncedCount += batch.length
+    }
+
+    const fetchedIds = new Set(indexed.repos.map(repo => repo.id))
+    const deletedIds = ((existingProjects || []) as ExistingProject[])
+      .filter(project => (includePrivate || project.is_private === false) && !fetchedIds.has(Number(project.github_repo_id)))
+      .map(project => Number(project.github_repo_id))
+    for (let offset = 0; offset < deletedIds.length; offset += 100) {
+      const batch = deletedIds.slice(offset, offset + 100)
+      const tombstonedAt = new Date().toISOString()
+      const { error } = await supabase.from('projects')
+        .update({ github_deleted_at: tombstonedAt, updated_at: tombstonedAt })
+        .eq('user_id', userId)
+        .in('github_repo_id', batch)
+      if (error) throw error
     }
 
     // Completed-catalog bookkeeping lives on the profile so webhook writes and

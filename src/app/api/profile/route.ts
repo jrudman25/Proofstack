@@ -61,9 +61,10 @@ export async function PATCH(request: Request) {
 
     if (body.published === true) {
       const { data: publishedRows, error: publicationError } = await auth.supabase.from('project_briefs')
-        .select('published_fields, projects!inner(user_id, is_private)')
+        .select('published_fields, projects!inner(user_id, is_private, github_deleted_at)')
         .eq('projects.user_id', auth.userId)
         .eq('projects.is_private', false)
+        .is('projects.github_deleted_at', null)
         .eq('visibility', 'public')
         .limit(500)
       if (publicationError) throw new ApiError(503, 'Service temporarily unavailable')

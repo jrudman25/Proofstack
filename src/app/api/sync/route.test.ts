@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { POST } from './route'
 
-const io = vi.hoisted(() => ({ getUser: vi.fn(), getSession: vi.fn(), from: vi.fn(), eval: vi.fn(), get: vi.fn(), set: vi.fn(), upsert: vi.fn(), update: vi.fn(), single: vi.fn(), storeToken: vi.fn(), getToken: vi.fn() }))
+const io = vi.hoisted(() => ({ getUser: vi.fn(), getSession: vi.fn(), from: vi.fn(), eval: vi.fn(), get: vi.fn(), set: vi.fn(), upsert: vi.fn(), update: vi.fn(), updateEq: vi.fn(), updateIn: vi.fn(), single: vi.fn(), storeToken: vi.fn(), getToken: vi.fn() }))
 vi.mock('next/headers', () => ({ cookies: async () => ({ getAll: () => [], set: vi.fn() }) }))
 vi.mock('@/lib/github-token-store', () => ({ storeGithubToken: io.storeToken, getStoredGithubToken: io.getToken }))
 vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth: { getUser: io.getUser, getSession: io.getSession }, from: io.from }) }))
@@ -22,7 +22,9 @@ beforeEach(() => {
   io.single.mockResolvedValue({ data: { id: userId }, error: null })
   io.upsert.mockResolvedValue({ error: null })
   io.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, upsert: io.upsert, update: io.update })
-  io.update.mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) })
+  io.updateEq.mockReturnValue({ in: io.updateIn, then: (resolve: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(resolve) })
+  io.updateIn.mockResolvedValue({ error: null })
+  io.update.mockReturnValue({ eq: io.updateEq })
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
     const parsed = new URL(url)
     if (parsed.pathname === '/user') return new Response('{}', { headers: { 'x-oauth-scopes': 'public_repo, read:user' } })
@@ -53,8 +55,9 @@ it('merges package, manifest, and language technologies with existing metadata',
   const profileQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, update: io.update }
   const projectQuery = {
     select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockResolvedValue({ data: [{ github_repo_id: 1, technologies: ['Custom Tool'] }], error: null }),
-    upsert: io.upsert
+    eq: vi.fn().mockResolvedValue({ data: [{ github_repo_id: 1, technologies: ['Custom Tool'], is_private: false }], error: null }),
+    upsert: io.upsert,
+    update: io.update
   }
   io.from.mockImplementation((table: string) => table === 'profiles' ? profileQuery : projectQuery)
   vi.mocked(fetch).mockImplementation(async input => {
@@ -195,4 +198,78 @@ it('does not persist any page when a later GitHub page is malformed', async () =
   expect(io.upsert).not.toHaveBeenCalled()
   // The scope probe may cache its result; the repo catalog must not be.
   expect(io.set.mock.calls.every(([key]) => !String(key).includes('github-repos'))).toBe(true)
+})
+
+function reconciliationFixture(existing: { github_repo_id: number; technologies: string[]; is_private: boolean }[], scopes = 'public_repo, read:user') {
+  const profileQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, update: io.update }
+  const projectQuery = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockResolvedValue({ data: existing, error: null }),
+    upsert: io.upsert,
+    update: io.update,
+  }
+  io.from.mockImplementation((table: string) => table === 'profiles' ? profileQuery : projectQuery)
+  vi.mocked(fetch).mockImplementation(async input => {
+    const parsed = new URL(String(input))
+    if (parsed.pathname === '/user') return new Response('{}', { headers: { 'x-oauth-scopes': scopes } })
+    if (parsed.pathname.endsWith('/package.json')) return new Response('', { status: 404 })
+    if (parsed.pathname.endsWith('/contents')) return new Response(JSON.stringify([]))
+    if (parsed.pathname.endsWith('/languages')) return new Response(JSON.stringify({}))
+    const page = Number(parsed.searchParams.get('page'))
+    return new Response(JSON.stringify(page === 1 ? [repos[0]] : []))
+  })
+}
+
+const existingRows = [
+  { github_repo_id: 1, technologies: [], is_private: false },
+  { github_repo_id: 500, technologies: [], is_private: false },
+  { github_repo_id: 501, technologies: [], is_private: true },
+]
+
+function tombstoneUpdates() {
+  return io.update.mock.calls
+    .map(([value]) => value)
+    .filter((value): value is { github_deleted_at: string; updated_at: string } =>
+      value !== null && typeof value === 'object' && 'github_deleted_at' in (value as Record<string, unknown>))
+}
+
+it('tombstones absent public rows but preserves private rows without private scope', async () => {
+  reconciliationFixture(existingRows)
+  const response = await POST(request())
+  expect(response.status).toBe(200)
+  const tombstones = tombstoneUpdates()
+  expect(tombstones).toHaveLength(1)
+  expect(tombstones[0].updated_at).toBe(tombstones[0].github_deleted_at)
+  expect(io.updateEq).toHaveBeenCalledWith('user_id', userId)
+  expect(io.updateIn).toHaveBeenCalledTimes(1)
+  expect(io.updateIn).toHaveBeenCalledWith('github_repo_id', [500])
+  expect(await response.json()).toMatchObject({ syncedCount: 1 })
+})
+
+it('reconciles private rows too once the owner connects private repositories', async () => {
+  reconciliationFixture(existingRows, 'repo, read:user')
+  const response = await POST(new Request('https://app.test/api/sync', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectPrivate: true }),
+  }))
+  expect(response.status).toBe(200)
+  expect(io.updateIn).toHaveBeenCalledTimes(1)
+  expect(io.updateIn).toHaveBeenCalledWith('github_repo_id', [500, 501])
+})
+
+it('clears the tombstone on every upserted row and leaves fetched rows unmarked', async () => {
+  reconciliationFixture([{ github_repo_id: 1, technologies: ['Kept'], is_private: false }])
+  const response = await POST(request())
+  expect(response.status).toBe(200)
+  expect(io.upsert.mock.calls.flatMap(([batch]) => batch)
+    .every((row: { github_deleted_at: null }) => row.github_deleted_at === null)).toBe(true)
+  expect(io.updateIn).not.toHaveBeenCalled()
+})
+
+it('fails the sync when tombstoning errors after confirmed upserts', async () => {
+  reconciliationFixture([{ github_repo_id: 500, technologies: [], is_private: false }])
+  io.updateIn.mockResolvedValue({ error: new Error('secret-database') })
+  const response = await POST(request())
+  expect(response.status).toBe(503)
+  expect(await response.json()).toEqual({ error: 'Service temporarily unavailable', syncedCount: 1, packageJsonCount: 0 })
+  expect(io.upsert).toHaveBeenCalledTimes(1)
 })
