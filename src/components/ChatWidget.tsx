@@ -21,6 +21,12 @@ const PROJECT_PROMPTS = [
   'What evidence is missing?',
 ]
 
+const PUBLIC_PROMPTS = [
+  'Which projects stand out?',
+  'What technologies does this developer use?',
+  'Summarize this portfolio',
+]
+
 type Message = { role: 'user' | 'assistant'; content: string }
 
 function boundHistory(messages: Message[]): { messages: Message[]; truncated: boolean } {
@@ -38,8 +44,10 @@ function boundHistory(messages: Message[]): { messages: Message[]; truncated: bo
 }
 
 // When mounted with a projectId, questions are answered from that project's
-// evidence only; otherwise the whole portfolio is in scope.
-export default function ChatWidget({ projectId, projectName }: { projectId?: string; projectName?: string } = {}) {
+// evidence only; otherwise the whole portfolio is in scope. With publicSlug
+// the widget posts to the unauthenticated public-chat endpoint scoped to the
+// published profile instead.
+export default function ChatWidget({ projectId, projectName, publicSlug, publicName }: { projectId?: string; projectName?: string; publicSlug?: string; publicName?: string } = {}) {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -76,10 +84,14 @@ export default function ChatWidget({ projectId, projectName }: { projectId?: str
     setIsLoading(true)
     setError('')
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(publicSlug ? '/api/public-chat' : '/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(projectId ? { messages: outbound.messages, projectId } : { messages: outbound.messages })
+        body: JSON.stringify({
+          messages: outbound.messages,
+          ...(projectId ? { projectId } : {}),
+          ...(publicSlug ? { slug: publicSlug } : {}),
+        })
       })
 
       const data = await res.json()
@@ -134,13 +146,24 @@ export default function ChatWidget({ projectId, projectName }: { projectId?: str
     inputRef.current?.focus()
   }
 
-  const prompts = projectName ? PROJECT_PROMPTS : PORTFOLIO_PROMPTS
+  const prompts = publicSlug ? PUBLIC_PROMPTS : projectName ? PROJECT_PROMPTS : PORTFOLIO_PROMPTS
+  const title = publicSlug
+    ? `Ask about ${publicName || 'this portfolio'}`
+    : projectName ? `Ask about ${projectName}` : 'Ask about your portfolio'
+  const launcherLabel = publicSlug
+    ? 'Ask about this portfolio'
+    : projectName ? `Ask about ${projectName}` : 'Ask about your portfolio'
+  const emptyText = publicSlug
+    ? 'Answers use only this published profile, with no outside knowledge.'
+    : projectName
+      ? `Answers use only ${projectName}'s repository metadata and README evidence.`
+      : 'Answers use your synced repository metadata and README evidence, with no outside knowledge.'
 
   return (
     <>
       <button
         ref={launcherRef}
-        aria-label={projectName ? `Ask about ${projectName}` : 'Ask about your portfolio'}
+        aria-label={launcherLabel}
         aria-expanded={isOpen}
         aria-controls="portfolio-chat"
         aria-hidden={isOpen}
@@ -158,7 +181,7 @@ export default function ChatWidget({ projectId, projectName }: { projectId?: str
           <div className="flex items-center gap-2">
             <Bot className="h-4 w-4 text-brand" />
             <h3 id="chat-title" className="label text-dim">
-              {projectName ? `Ask about ${projectName}` : 'Ask about your portfolio'}
+              {title}
             </h3>
           </div>
           <div className="flex items-center gap-1">
@@ -189,9 +212,7 @@ export default function ChatWidget({ projectId, projectName }: { projectId?: str
           {messages.length === 0 && (
             <div className="mt-10 text-center">
               <p className="mx-auto max-w-[260px] text-sm text-dim">
-                {projectName
-                  ? `Answers use only ${projectName}'s repository metadata and README evidence.`
-                  : 'Answers use your synced repository metadata and README evidence, with no outside knowledge.'}
+                {emptyText}
               </p>
               <div className="mx-auto mt-5 flex max-w-[280px] flex-col gap-2">
                 {prompts.map(prompt => (

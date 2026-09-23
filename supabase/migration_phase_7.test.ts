@@ -12,6 +12,7 @@ const vectorMigration = sql('migrations/20260914000002_move_vector_extension.sql
 const consentSerializationMigration = sql('migrations/20260916000000_serialize_ai_consent_embeddings.sql')
 const publicProfilesMigration = sql('migrations/20260920000000_public_profiles.sql')
 const retireMigration = sql('migrations/20260921000000_retire_legacy_features.sql')
+const unclaimedOptOutMigration = sql('migrations/20260923000000_unclaimed_analysis_opt_out.sql')
 const setup = sql('setup.sql')
 const functions = sql('functions.sql')
 
@@ -148,6 +149,13 @@ it('keeps legacy tables readable but write-revoked in a fresh setup', () => {
   expect(setup).toContain('revoke insert, update, delete on table public.milestones from authenticated')
   expect(setup).toContain('revoke insert, update, delete on table public.todos from authenticated')
   expect(setup).not.toContain('summary text')
+})
+it('adds the unclaimed-analysis opt-out flag, enabled by default, without weakening RLS', () => {
+  for (const text of [setup, unclaimedOptOutMigration]) {
+    expect(text).toMatch(/unclaimed_analysis_opt_out boolean (?:not null default false|default false not null)/)
+  }
+  expect(unclaimedOptOutMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)
+  expect(unclaimedOptOutMigration).not.toMatch(/\bdelete\s+from\b|\btruncate\b|\bdrop\s+table\b|\bdrop\s+policy\b|\bdisable\s+row\s+level\s+security\b/)
 })
 it('revokes browser-role execution from security definer functions', () => {
   expect(definerMigration.trim()).toMatch(/^begin;[\s\S]*commit;$/)

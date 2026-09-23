@@ -16,7 +16,7 @@ export default async function AccountPage() {
 
   const [{ data: profile }, { data: briefingRow }, projectsResult] = await Promise.all([
     supabase.from('profiles')
-      .select('public_slug, profile_published, profile_published_at, public_briefing_published_at')
+      .select('public_slug, profile_published, profile_published_at, public_briefing_published_at, unclaimed_analysis_opt_out')
       .eq('id', user.id).maybeSingle(),
     supabase.from('portfolio_briefings').select('user_id').eq('user_id', user.id).maybeSingle(),
     supabase.from('projects')
@@ -46,6 +46,7 @@ export default async function AccountPage() {
         published: profile?.profile_published ?? false,
         briefingPublishedAt: profile?.public_briefing_published_at ?? null,
         hasBriefing: Boolean(briefingRow),
+        unclaimedAnalysisOptOut: profile?.unclaimed_analysis_opt_out ?? false,
       }}
       publicationProjects={publicationProjects}
       publicationProjectsFailed={Boolean(projectsResult.error)}

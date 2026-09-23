@@ -18,6 +18,7 @@ create table profiles (
   profile_published_at timestamp with time zone,
   public_briefing jsonb,
   public_briefing_published_at timestamp with time zone,
+  unclaimed_analysis_opt_out boolean default false not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 

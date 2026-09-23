@@ -22,6 +22,7 @@ type Publication = {
   published: boolean
   briefingPublishedAt: string | null
   hasBriefing: boolean
+  unclaimedAnalysisOptOut: boolean
 }
 
 type ProfileResponse = {
@@ -29,6 +30,7 @@ type ProfileResponse = {
   profile_published: boolean
   profile_published_at: string | null
   public_briefing_published_at: string | null
+  unclaimed_analysis_opt_out: boolean
 }
 
 export default function AccountClient({ email, publication, publicationProjects, publicationProjectsFailed = false }: {
@@ -66,6 +68,7 @@ export default function AccountClient({ email, publication, publicationProjects,
         slug: saved.public_slug,
         published: saved.profile_published,
         briefingPublishedAt: saved.public_briefing_published_at ?? current.briefingPublishedAt,
+        unclaimedAnalysisOptOut: saved.unclaimed_analysis_opt_out ?? current.unclaimedAnalysisOptOut,
       }))
       if (saved.public_slug) setSlug(saved.public_slug)
       setProfileMessage('Saved.')
@@ -274,6 +277,27 @@ export default function AccountClient({ email, publication, publicationProjects,
           </ol>
 
           {profileMessage && <p role="status" className="mt-4 font-mono text-[11px] text-dim">{profileMessage}</p>}
+        </section>
+
+        <section className="border border-line bg-surface px-6 py-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="label text-dim">Automated previews</h2>
+              <p className="mt-1 max-w-xl text-sm leading-relaxed text-dim">
+                Until you publish, visitors can generate a clearly labeled automated preview of your public GitHub data. Turn this off to exclude your GitHub username.
+              </p>
+            </div>
+            <label className="eyebrow flex shrink-0 cursor-pointer items-center gap-2 text-dim">
+              <input
+                type="checkbox"
+                checked={profile.unclaimedAnalysisOptOut}
+                disabled={isSaving}
+                onChange={event => patchProfile({ unclaimedAnalysisOptOut: event.target.checked }, 'Unable to update automated previews.')}
+                className="h-4 w-4 accent-brand"
+              />
+              Exclude me
+            </label>
+          </div>
         </section>
 
         <section className="border border-line bg-surface px-6 py-5">

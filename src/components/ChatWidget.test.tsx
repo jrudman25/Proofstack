@@ -146,6 +146,29 @@ it('keeps header controls at least 40px with pointer titles and the launcher at 
   expect(restart).toHaveAttribute('title', 'New conversation')
 })
 
+it('posts to the public chat endpoint scoped to the published profile', async () => {
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ content: 'Public answer' }) })
+  vi.stubGlobal('fetch', fetchMock)
+  render(<ChatWidget publicSlug="octocat" publicName="Octo Cat" />)
+  fireEvent.click(screen.getByRole('button', { name: 'Ask about this portfolio' }))
+  expect(screen.getByRole('region', { name: 'Ask about Octo Cat' })).toBeInTheDocument()
+  expect(screen.getByText(/only this published profile/)).toBeInTheDocument()
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'What do they build?' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Send chat message' }))
+  expect(await screen.findByText('Public answer')).toBeInTheDocument()
+  expect(fetchMock).toHaveBeenCalledWith('/api/public-chat', expect.objectContaining({
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'What do they build?' }], slug: 'octocat' }),
+  }))
+})
+
+it('shows public prompt starters on published profiles', () => {
+  render(<ChatWidget publicSlug="octocat" />)
+  fireEvent.click(screen.getByRole('button', { name: 'Ask about this portfolio' }))
+  expect(screen.getByRole('button', { name: 'Which projects stand out?' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'What technologies does this developer use?' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Where is my evidence weakest?' })).not.toBeInTheDocument()
+})
+
 it('shows project-scoped prompt starters instead of portfolio ones', () => {
   render(<ChatWidget projectId="22345678-1234-1234-1234-123456789abc" projectName="Example" />)
   fireEvent.click(screen.getByRole('button', { name: 'Ask about Example' }))

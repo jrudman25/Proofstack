@@ -368,3 +368,101 @@ export async function fetchGithubReadme(owner: string, repo: string, identity: G
     unavailable()
   }
 }
+
+// GitHub usernames: up to 39 characters, alphanumeric or single hyphens, never
+// leading or trailing hyphens. Case-insensitive; callers normalize to lower.
+export const GITHUB_USERNAME_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/
+
+export type GithubPublicUser = {
+  login: string
+  name: string | null
+  avatar_url: string | null
+  bio: string | null
+  public_repos: number
+  created_at: string | null
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+
+function parsePublicUser(value: unknown): GithubPublicUser {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable()
+  const user = value as Record<string, unknown>
+  const avatar = user.avatar_url
+  if (typeof user.login !== 'string' || !GITHUB_USERNAME_PATTERN.test(user.login)
+    || !(user.name === null || typeof user.name === 'string')
+    || !(user.bio === null || typeof user.bio === 'string')
+    || !(avatar === null || (typeof avatar === 'string' && avatar.startsWith('https://')))
+    || !Number.isSafeInteger(user.public_repos) || (user.public_repos as number) < 0
+    || !(user.created_at === null || (typeof user.created_at === 'string' && ISO_DATE.test(user.created_at)))) unavailable()
+  return {
+    login: user.login, name: user.name as string | null,
+    avatar_url: user.avatar_url as string | null, bio: user.bio as string | null,
+    public_repos: user.public_repos as number, created_at: user.created_at as string | null,
+  }
+}
+
+function parsePublicUserCache(value: unknown): GithubPublicUser | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable()
+  const cached = value as Record<string, unknown>
+  if (cached.found === false) return null
+  if (cached.found !== true) unavailable()
+  return parsePublicUser(cached.user)
+}
+
+// Public profile lookups run unauthenticated: the identity carries no token
+// and the cache is shared across visitors for the same username.
+export async function fetchGithubPublicUser(username: string, identity: GithubIdentity): Promise<GithubPublicUser | null> {
+  try {
+    if (!GITHUB_USERNAME_PATTERN.test(username)) unavailable()
+    const redis = createRedis()
+    const key = cacheKey(identity, 'github-public-user', username)
+    const cached = await redis.get(key)
+    if (cached !== null) return parsePublicUserCache(cached)
+    const res = await fetch(`https://api.github.com/users/${encodeURIComponent(username)}`, {
+      headers: headers(identity, 'application/vnd.github+json'), redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (res.status === 404) {
+      await redis.set(key, { found: false }, { ex: 86400 })
+      return null
+    }
+    if (!res.ok) unavailable()
+    const user = parsePublicUser(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await readBodyBytes(res, 256 * 1024))))
+    await redis.set(key, { found: true, user }, { ex: 86400 })
+    return user
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    unavailable()
+  }
+}
+
+// Public repository list for an arbitrary GitHub user: one page of at most
+// 100 repositories sorted by last push, cached for 24 hours.
+export async function fetchGithubUserRepos(username: string, identity: GithubIdentity): Promise<GithubRepo[] | null> {
+  try {
+    if (!GITHUB_USERNAME_PATTERN.test(username)) unavailable()
+    const redis = createRedis()
+    const key = cacheKey(identity, 'github-public-repos', username)
+    const cached = await redis.get(key)
+    if (cached !== null) {
+      if (cached && typeof cached === 'object' && !Array.isArray(cached)
+        && (cached as Record<string, unknown>).found === false) return null
+      return parseRepos(cached, 100)
+    }
+    const res = await fetch(`https://api.github.com/users/${encodeURIComponent(username)}/repos?per_page=100&sort=pushed`, {
+      headers: headers(identity, 'application/vnd.github+json'), redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (res.status === 404) {
+      await redis.set(key, { found: false }, { ex: 86400 })
+      return null
+    }
+    if (!res.ok) unavailable()
+    const repos = parseRepos(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await readBodyBytes(res, 4 * 1024 * 1024))), 100)
+    await redis.set(key, repos, { ex: 86400 })
+    return repos
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    unavailable()
+  }
+}

@@ -9,10 +9,10 @@ vi.mock('@/utils/supabase/client', () => ({
   createClient: () => ({ auth: { signOut: vi.fn().mockResolvedValue({}) } }),
 }))
 
-const draftPublication = { slug: null, published: false, briefingPublishedAt: null, hasBriefing: true }
+const draftPublication = { slug: null, published: false, briefingPublishedAt: null, hasBriefing: true, unclaimedAnalysisOptOut: false }
 const livePublication = {
   slug: 'octocat', published: true,
-  briefingPublishedAt: '2026-09-20T00:00:00.000Z', hasBriefing: true,
+  briefingPublishedAt: '2026-09-20T00:00:00.000Z', hasBriefing: true, unclaimedAnalysisOptOut: false,
 }
 
 const selectedProject: PublicationProject = {
@@ -25,7 +25,7 @@ const privateProject: PublicationProject = {
   id: 'p3', name: 'Secret', isPrivate: true, visibility: 'private', publishedFields: [],
 }
 
-const profileResponse = { public_slug: 'octocat', profile_published: true, profile_published_at: '2026-09-21T00:00:00.000Z', public_briefing_published_at: '2026-09-21T00:00:00.000Z' }
+const profileResponse = { public_slug: 'octocat', profile_published: true, profile_published_at: '2026-09-21T00:00:00.000Z', public_briefing_published_at: '2026-09-21T00:00:00.000Z', unclaimed_analysis_opt_out: false }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
@@ -118,6 +118,21 @@ it('shows a recoverable status and blocks publishing when projects fail to load'
   expect(screen.getByText(/publication state cannot be verified/)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
   expect(router.refresh).toHaveBeenCalledOnce()
+})
+
+it('toggles the unclaimed-analysis opt-out through the profile API', async () => {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ profile: { ...profileResponse, unclaimed_analysis_opt_out: true } }),
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  render(<AccountClient email={null} publication={draftPublication} publicationProjects={[]} />)
+  const toggle = screen.getByRole('checkbox', { name: 'Exclude me' })
+  expect(toggle).not.toBeChecked()
+  fireEvent.click(toggle)
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ unclaimedAnalysisOptOut: true })
+  expect(toggle).toBeChecked()
 })
 
 it('links to the preserved legacy task export', () => {

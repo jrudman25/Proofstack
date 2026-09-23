@@ -2,11 +2,15 @@ import { cache } from 'react'
 import type { Metadata } from 'next'
 import Image from 'next/image'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { GitFork, Star } from 'lucide-react'
 import { getPublicProfile } from '@/lib/public-profile'
+import { fetchGithubPublicUser, GITHUB_USERNAME_PATTERN, type GithubIdentity } from '@/lib/github/api'
+import { getCachedUnclaimedAnalysis, getUnclaimedGate } from '@/lib/unclaimed-profile'
 import { Logo } from '@/components/icons/Logo'
 import { GithubIcon } from '@/components/icons/GithubIcon'
+import ChatWidget from '@/components/ChatWidget'
+import UnclaimedProfile from '@/components/UnclaimedProfile'
 import type { ProjectLifecycleStatus, PublicProfile, PublishableBriefField } from '@/types'
 
 // Public pages always read live publication state; unpublished or revoked
@@ -14,12 +18,21 @@ import type { ProjectLifecycleStatus, PublicProfile, PublishableBriefField } fro
 export const dynamic = 'force-dynamic'
 
 const loadProfile = cache((slug: string) => getPublicProfile(slug))
+const loadGate = cache((slug: string) => getUnclaimedGate(slug))
+
+// Public lookups carry no credential; responses are cached per username.
+const ANONYMOUS_GITHUB: GithubIdentity = { userId: 'public', accessToken: undefined }
 
 type Props = { params: Promise<{ slug: string }> }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const profile = await loadProfile((await params).slug)
-  if (!profile) return { title: 'Profile not found' }
+  const slug = (await params).slug
+  const profile = await loadProfile(slug)
+  if (!profile) {
+    // Automated previews are temporary and must stay out of search indexes.
+    const valid = GITHUB_USERNAME_PATTERN.test(slug.toLowerCase())
+    return { title: valid ? `@${slug} · automated preview` : 'Profile not found', robots: { index: false, follow: false } }
+  }
   const name = profile.fullName || profile.githubUsername
   return {
     title: `${name} · Proofstack`,
@@ -53,7 +66,7 @@ function relationship(project: PublicProfile['projects'][number], username: stri
 export default async function PublicProfilePage({ params }: Props) {
   const { slug } = await params
   const profile = await loadProfile(slug)
-  if (!profile) notFound()
+  if (!profile) return <UnclaimedProfilePage slug={slug} />
   const name = profile.fullName || profile.githubUsername
 
   return (
@@ -193,6 +206,39 @@ export default async function PublicProfilePage({ params }: Props) {
           <Link href="/" className="underline-offset-2 hover:text-brand hover:underline">Create your own</Link>
         </footer>
       </main>
+      <ChatWidget publicSlug={profile.slug} publicName={name} />
+    </div>
+  )
+}
+
+// Fallback for GitHub users with no published Proofstack profile: a clearly
+// labeled automated preview generated on demand from public GitHub data.
+async function UnclaimedProfilePage({ slug }: { slug: string }) {
+  const normalized = slug.toLowerCase()
+  if (!GITHUB_USERNAME_PATTERN.test(normalized)) notFound()
+  const gate = await loadGate(normalized)
+  if (gate.status === 'claimed') redirect(`/u/${gate.slug}`)
+  if (gate.status === 'blocked') notFound()
+
+  const user = await fetchGithubPublicUser(normalized, ANONYMOUS_GITHUB)
+  if (!user) notFound()
+  const analysis = await getCachedUnclaimedAnalysis(normalized)
+
+  return (
+    <div className="min-h-screen font-sans">
+      <header className="border-b border-line bg-ink/90">
+        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
+          <Logo className="h-5 w-5 text-brand" />
+          <span className="label font-bold tracking-[0.3em]">Proofstack</span>
+        </div>
+      </header>
+      <UnclaimedProfile
+        username={user.login}
+        displayName={user.name}
+        avatarUrl={user.avatar_url}
+        publicRepoCount={user.public_repos}
+        initialAnalysis={analysis}
+      />
     </div>
   )
 }

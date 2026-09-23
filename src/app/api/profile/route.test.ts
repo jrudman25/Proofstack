@@ -20,7 +20,7 @@ const storedBriefing = {
   interviewQuestions: ['private preparation only'],
   citations: [{ projectId: 'p1', name: 'repolio', url: 'https://github.com/octocat/repolio', evidence: ['github'] }],
 }
-const profileResult = { public_slug: 'octocat', profile_published: true, profile_published_at: '2026-09-20T00:00:00.000Z', public_briefing_published_at: null }
+const profileResult = { public_slug: 'octocat', profile_published: true, profile_published_at: '2026-09-20T00:00:00.000Z', public_briefing_published_at: null, unclaimed_analysis_opt_out: false }
 
 function patch(value: unknown) {
   return new Request('https://app.test/api/profile', { method: 'PATCH', body: JSON.stringify(value) })
@@ -70,6 +70,7 @@ it.each([
   { slug: 'a'.repeat(40) },
   { published: 'yes' },
   { publishBriefing: false },
+  { unclaimedAnalysisOptOut: 'yes' },
 ])('rejects malformed settings before database access: %p', async value => {
   const response = await PATCH(patch(value))
   expect(response.status).toBe(400)
@@ -178,4 +179,17 @@ it('sanitizes database failures', async () => {
   const response = await PATCH(patch({ slug: 'octocat' }))
   expect(response.status).toBe(503)
   expect(await response.text()).not.toContain('secret database details')
+})
+
+it('stores the unclaimed-analysis opt-out flag', async () => {
+  const response = await PATCH(patch({ unclaimedAnalysisOptOut: true }))
+  expect(response.status).toBe(200)
+  expect(io.update).toHaveBeenCalledWith({ unclaimed_analysis_opt_out: true })
+})
+
+it('returns the stored opt-out flag in the profile response', async () => {
+  io.updateSingle.mockResolvedValue({ data: { ...profileResult, unclaimed_analysis_opt_out: true }, error: null })
+  const response = await PATCH(patch({ unclaimedAnalysisOptOut: true }))
+  expect(response.status).toBe(200)
+  expect((await response.json()).profile.unclaimed_analysis_opt_out).toBe(true)
 })

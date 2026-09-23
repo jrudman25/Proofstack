@@ -5,7 +5,7 @@ import { enforceRateLimit } from '@/lib/rate-limit'
 import { PUBLIC_SLUG_PATTERN, buildPublicBriefingSnapshot } from '@/lib/public-profile'
 import type { PortfolioBriefing } from '@/types'
 
-const PROFILE_FIELDS = 'public_slug, profile_published, profile_published_at, public_briefing_published_at'
+const PROFILE_FIELDS = 'public_slug, profile_published, profile_published_at, public_briefing_published_at, unclaimed_analysis_opt_out'
 
 // Owner publication controls. Publishing copies the current briefing into a
 // public snapshot so regenerating the private briefing can never silently
@@ -15,7 +15,7 @@ export async function PATCH(request: Request) {
   try {
     const auth = await authenticateUser()
     const body = objectBody(await readJsonBody(request, 4096))
-    const allowed = new Set(['slug', 'published', 'publishBriefing'])
+    const allowed = new Set(['slug', 'published', 'publishBriefing', 'unclaimedAnalysisOptOut'])
     const keys = Object.keys(body)
     if (!keys.length || keys.some(key => !allowed.has(key))) throw new ApiError(400, 'Invalid profile settings')
 
@@ -29,12 +29,14 @@ export async function PATCH(request: Request) {
     }
     if ('published' in body && typeof body.published !== 'boolean') throw new ApiError(400, 'Invalid profile settings')
     if ('publishBriefing' in body && body.publishBriefing !== true) throw new ApiError(400, 'Invalid profile settings')
+    if ('unclaimedAnalysisOptOut' in body && typeof body.unclaimedAnalysisOptOut !== 'boolean') throw new ApiError(400, 'Invalid profile settings')
 
     await enforceRateLimit(auth, 'account')
 
     const now = new Date().toISOString()
     const update: Record<string, unknown> = {}
     if (slug !== undefined) update.public_slug = slug
+    if (typeof body.unclaimedAnalysisOptOut === 'boolean') update.unclaimed_analysis_opt_out = body.unclaimedAnalysisOptOut
     if (typeof body.published === 'boolean') {
       update.profile_published = body.published
       update.profile_published_at = body.published ? now : null

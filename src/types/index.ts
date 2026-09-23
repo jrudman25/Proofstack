@@ -122,3 +122,14 @@ export type PublicProfile = {
     brief: Partial<Record<PublishableBriefField, string | null>>
   }[]
 }
+
+// Automated, temporary analysis of a GitHub user who has not claimed a
+// Proofstack profile. Stored only in a bounded cache and always rendered
+// with an unclaimed/automated label, separate from owner-verified content.
+export type UnclaimedAnalysis = {
+  username: string
+  summary: string
+  focusAreas: string[]
+  notableProjects: { name: string; url: string; reason: string }[]
+  generatedAt: string
+}
