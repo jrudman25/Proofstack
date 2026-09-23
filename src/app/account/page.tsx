@@ -14,7 +14,7 @@ export default async function AccountPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: profile }, { data: briefingRow }, projectsResult] = await Promise.all([
+  const [profileResult, briefingResult, projectsResult] = await Promise.all([
     supabase.from('profiles')
       .select('public_slug, profile_published, profile_published_at, public_briefing_published_at, unclaimed_analysis_opt_out')
       .eq('id', user.id).maybeSingle(),
@@ -25,8 +25,12 @@ export default async function AccountPage() {
       .is('github_deleted_at', null)
       .order('name', { ascending: true }),
   ])
+  const profile = profileResult.data
+  const briefingRow = briefingResult.data
 
   if (projectsResult.error) console.error('Error fetching publication projects')
+  const publicationSettingsFailed = Boolean(profileResult.error || briefingResult.error)
+  if (publicationSettingsFailed) console.error('Error fetching publication settings')
 
   const publicationProjects: PublicationProject[] = ((projectsResult.data || []) as PublicationRow[]).map(row => {
     const brief = Array.isArray(row.project_briefs) ? row.project_briefs[0] : row.project_briefs
@@ -51,6 +55,8 @@ export default async function AccountPage() {
       }}
       publicationProjects={publicationProjects}
       publicationProjectsFailed={Boolean(projectsResult.error)}
+      publicationSettingsFailed={publicationSettingsFailed}
+      key={publicationSettingsFailed ? 'settings-failed' : 'settings-loaded'}
     />
   )
 }

@@ -136,6 +136,42 @@ it('toggles the unclaimed-analysis opt-out through the profile API', async () =>
   expect(toggle).toBeChecked()
 })
 
+it('locks publication settings controls and shows a recoverable alert when settings fail to load', () => {
+  render(<AccountClient email={null} publication={draftPublication}
+    publicationProjects={[selectedProject]} publicationSettingsFailed />)
+  const alert = screen.getByRole('alert')
+  expect(alert).toHaveTextContent('publication settings could not be loaded')
+  expect(alert).toHaveTextContent('controls stay disabled until the page reloads')
+  expect(screen.getByRole('textbox', { name: 'Profile URL slug' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Save URL' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Publish latest briefing' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Publish profile' })).toBeDisabled()
+  expect(screen.getByRole('checkbox', { name: 'Exclude me' })).toBeDisabled()
+  expect(screen.getAllByText('Unavailable')).toHaveLength(3)
+  expect(screen.queryByText('Not saved')).not.toBeInTheDocument()
+  expect(screen.queryByText('No snapshot')).not.toBeInTheDocument()
+  expect(screen.queryByText('Not live')).not.toBeInTheDocument()
+  expect(screen.queryByText('Save a profile URL first.')).not.toBeInTheDocument()
+  expect(screen.getByText('Unavailable until the page reloads.')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+  expect(router.refresh).toHaveBeenCalledOnce()
+})
+
+it('disables unpublish and hides derived state when a live-looking profile has failed settings', () => {
+  render(<AccountClient email={null} publication={livePublication}
+    publicationProjects={[selectedProject]} publicationSettingsFailed />)
+  expect(screen.getByRole('button', { name: 'Unpublish profile' })).toBeDisabled()
+  expect(screen.queryByRole('link', { name: '/u/octocat' })).not.toBeInTheDocument()
+  expect(screen.queryByText('Live')).not.toBeInTheDocument()
+})
+
+it('shows both alerts and keeps publish disabled when projects and settings fail together', () => {
+  render(<AccountClient email={null} publication={{ ...draftPublication, slug: 'octocat' }}
+    publicationProjects={[]} publicationProjectsFailed publicationSettingsFailed />)
+  expect(screen.getAllByRole('alert')).toHaveLength(2)
+  expect(screen.getByRole('button', { name: 'Publish profile' })).toBeDisabled()
+})
+
 it('links to the preserved legacy task export', () => {
   render(<AccountClient email={null} publication={draftPublication} publicationProjects={[]} />)
   expect(screen.getByRole('link', { name: /Download JSON/ })).toHaveAttribute('href', '/api/account/legacy-export')

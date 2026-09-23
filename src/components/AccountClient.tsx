@@ -8,6 +8,7 @@ import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/utils/supabase/client'
 import { clientErrorMessage } from '@/lib/client-error-message'
+import StatusMessage, { type StatusNotice } from '@/components/StatusMessage'
 
 export type PublicationProject = {
   id: string
@@ -33,24 +34,25 @@ type ProfileResponse = {
   unclaimed_analysis_opt_out: boolean
 }
 
-export default function AccountClient({ email, publication, publicationProjects, publicationProjectsFailed = false }: {
+export default function AccountClient({ email, publication, publicationProjects, publicationProjectsFailed = false, publicationSettingsFailed = false }: {
   email: string | null
   publication: Publication
   publicationProjects: PublicationProject[]
   publicationProjectsFailed?: boolean
+  publicationSettingsFailed?: boolean
 }) {
   const router = useRouter()
   const [confirming, setConfirming] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState<StatusNotice | null>(null)
   const [slug, setSlug] = useState(publication.slug ?? '')
   const [profile, setProfile] = useState(publication)
   const [isSaving, setIsSaving] = useState(false)
-  const [profileMessage, setProfileMessage] = useState('')
+  const [profileMessage, setProfileMessage] = useState<StatusNotice | null>(null)
 
   const patchProfile = async (body: Record<string, unknown>, fallback: string) => {
     setIsSaving(true)
-    setProfileMessage('')
+    setProfileMessage(null)
     try {
       const res = await fetch('/api/profile', {
         method: 'PATCH',
@@ -59,7 +61,7 @@ export default function AccountClient({ email, publication, publicationProjects,
       })
       const result = await res.json()
       if (!res.ok) {
-        setProfileMessage(clientErrorMessage(res, result, fallback))
+        setProfileMessage({ text: clientErrorMessage(res, result, fallback), tone: 'error' })
         return
       }
       const saved = result.profile as ProfileResponse
@@ -71,14 +73,15 @@ export default function AccountClient({ email, publication, publicationProjects,
         unclaimedAnalysisOptOut: saved.unclaimed_analysis_opt_out ?? current.unclaimedAnalysisOptOut,
       }))
       if (saved.public_slug) setSlug(saved.public_slug)
-      setProfileMessage('Saved.')
+      setProfileMessage({ text: 'Saved.', tone: 'info' })
     } catch {
-      setProfileMessage(fallback)
+      setProfileMessage({ text: fallback, tone: 'error' })
     } finally {
       setIsSaving(false)
     }
   }
 
+  const settingsLocked = isSaving || publicationSettingsFailed
   const publicUrl = profile.slug && profile.published ? `/u/${profile.slug}` : null
 
   const eligibleProjects = publicationProjects.filter(project => !project.isPrivate)
@@ -100,18 +103,18 @@ export default function AccountClient({ email, publication, publicationProjects,
 
   const handleDelete = async () => {
     setIsDeleting(true)
-    setMessage('')
+    setMessage(null)
     try {
       const res = await fetch('/api/account', { method: 'DELETE' })
       if (!res.ok) {
-        setMessage('Unable to delete your account. Please try again.')
+        setMessage({ text: 'Unable to delete your account. Please try again.', tone: 'error' })
         return
       }
       const supabase = createClient()
       await supabase.auth.signOut()
       router.replace('/login')
     } catch {
-      setMessage('Unable to delete your account. Please try again.')
+      setMessage({ text: 'Unable to delete your account. Please try again.', tone: 'error' })
     } finally {
       setIsDeleting(false)
     }
@@ -144,11 +147,22 @@ export default function AccountClient({ email, publication, publicationProjects,
             Publish a curated view of your portfolio. Only projects selected in their brief and the fields you checked appear publicly; private repositories are never shown.
           </p>
 
+          {publicationSettingsFailed && (
+            <div className="mt-3">
+              <p role="alert" className="text-sm leading-relaxed text-dim">
+                Your publication settings could not be loaded, so the saved profile URL, briefing snapshot, live state, and automated-preview preference cannot be verified. These controls stay disabled until the page reloads.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => router.refresh()} className="eyebrow mt-3">
+                <RefreshCw className="h-3.5 w-3.5" /> Reload
+              </Button>
+            </div>
+          )}
+
           <ol className="mt-5 space-y-6">
             <li className="border-l border-line-bright pl-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h3 className="eyebrow text-foreground">01 · Profile URL</h3>
-                <span className="font-mono text-[10px] text-dim">{profile.slug ? `Saved: /u/${profile.slug}` : 'Not saved'}</span>
+                <span className="font-mono text-[10px] text-dim">{publicationSettingsFailed ? 'Unavailable' : profile.slug ? `Saved: /u/${profile.slug}` : 'Not saved'}</span>
               </div>
               <label className="mt-3 block space-y-2">
                 <span className="eyebrow text-dim">Profile URL</span>
@@ -159,11 +173,12 @@ export default function AccountClient({ email, publication, publicationProjects,
                     value={slug}
                     onChange={event => setSlug(event.target.value)}
                     placeholder="your-github-username"
+                    disabled={settingsLocked}
                     className="field w-full max-w-xs px-3 py-2 font-mono text-[13px]"
                   />
                 </span>
               </label>
-              <Button variant="outline" disabled={isSaving} onClick={() => patchProfile({ slug }, 'Unable to save the profile URL.')} className="eyebrow mt-3">
+              <Button variant="outline" disabled={settingsLocked} onClick={() => patchProfile({ slug }, 'Unable to save the profile URL.')} className="eyebrow mt-3">
                 Save URL
               </Button>
             </li>
@@ -221,7 +236,7 @@ export default function AccountClient({ email, publication, publicationProjects,
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h3 className="eyebrow text-foreground">03 · Briefing snapshot</h3>
                 <span className="font-mono text-[10px] text-dim">
-                  {profile.briefingPublishedAt
+                  {publicationSettingsFailed ? 'Unavailable' : profile.briefingPublishedAt
                     ? `Published ${new Date(profile.briefingPublishedAt).toISOString().slice(0, 10)}`
                     : 'No snapshot'}
                 </span>
@@ -231,14 +246,14 @@ export default function AccountClient({ email, publication, publicationProjects,
               </p>
               <Button
                 variant="outline"
-                disabled={isSaving || !profile.hasBriefing}
+                disabled={settingsLocked || !profile.hasBriefing}
                 onClick={() => patchProfile({ publishBriefing: true }, 'Unable to publish the briefing.')}
                 className="eyebrow mt-3"
                 title={profile.hasBriefing ? 'Copy the current portfolio briefing to your public profile' : 'Generate a portfolio briefing first'}
               >
                 Publish latest briefing
               </Button>
-              {!profile.hasBriefing && (
+              {!profile.hasBriefing && !publicationSettingsFailed && (
                 <p className="mt-2 font-mono text-[10px] text-dim">Generate a briefing on the dashboard first.</p>
               )}
             </li>
@@ -246,16 +261,16 @@ export default function AccountClient({ email, publication, publicationProjects,
             <li className="border-l border-line-bright pl-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h3 className="eyebrow text-foreground">04 · Profile state</h3>
-                <span className="font-mono text-[10px] text-dim">{profile.published ? 'Live' : 'Not live'}</span>
+                <span className="font-mono text-[10px] text-dim">{publicationSettingsFailed ? 'Unavailable' : profile.published ? 'Live' : 'Not live'}</span>
               </div>
-              {!profile.published && publishBlockers.length > 0 && (
+              {!profile.published && !publicationSettingsFailed && publishBlockers.length > 0 && (
                 <ul className="mt-2 space-y-1 text-xs leading-relaxed text-dim">
                   {publishBlockers.map(blocker => <li key={blocker}>{blocker}</li>)}
                 </ul>
               )}
               <Button
                 variant={profile.published ? 'outline' : 'default'}
-                disabled={isSaving || (!profile.published && !canPublish)}
+                disabled={settingsLocked || (!profile.published && !canPublish)}
                 onClick={() => patchProfile({ published: !profile.published }, 'Unable to update publication.')}
                 className="eyebrow mt-3"
               >
@@ -263,7 +278,7 @@ export default function AccountClient({ email, publication, publicationProjects,
               </Button>
             </li>
 
-            {publicUrl && (
+            {publicUrl && !publicationSettingsFailed && (
               <li className="border-l border-brand pl-4">
                 <h3 className="eyebrow text-foreground">05 · Preview</h3>
                 <p className="mt-2 font-mono text-[11px] text-dim">
@@ -277,7 +292,7 @@ export default function AccountClient({ email, publication, publicationProjects,
             )}
           </ol>
 
-          {profileMessage && <p role="status" className="mt-4 font-mono text-[11px] text-dim">{profileMessage}</p>}
+          {profileMessage && <StatusMessage tone={profileMessage.tone} className="mt-4">{profileMessage.text}</StatusMessage>}
         </section>
 
         <section className="border border-line bg-surface px-6 py-5">
@@ -287,12 +302,15 @@ export default function AccountClient({ email, publication, publicationProjects,
               <p className="mt-1 max-w-xl text-sm leading-relaxed text-dim">
                 Until you publish, visitors can generate a clearly labeled automated preview of your public GitHub data. Turn this off to exclude your GitHub username.
               </p>
+              {publicationSettingsFailed && (
+                <p className="mt-2 font-mono text-[10px] text-dim">Unavailable until the page reloads.</p>
+              )}
             </div>
             <label className="eyebrow flex shrink-0 cursor-pointer items-center gap-2 text-dim">
               <input
                 type="checkbox"
                 checked={profile.unclaimedAnalysisOptOut}
-                disabled={isSaving}
+                disabled={settingsLocked}
                 onChange={event => patchProfile({ unclaimedAnalysisOptOut: event.target.checked }, 'Unable to update automated previews.')}
                 className="h-4 w-4 accent-brand"
               />
@@ -337,7 +355,7 @@ export default function AccountClient({ email, publication, publicationProjects,
               <p className="mt-1 max-w-xl text-sm leading-relaxed text-dim">
                 Permanently removes your profile, projects, project briefs, portfolio briefings, embedded README evidence, and your stored GitHub credential. This cannot be undone.
               </p>
-              {message && <p role="status" className="mt-2 font-mono text-[11px] text-dim">{message}</p>}
+              {message && <StatusMessage tone={message.tone} className="mt-2">{message.text}</StatusMessage>}
             </div>
             {confirming ? (
               <div className="flex shrink-0 items-center gap-3">
