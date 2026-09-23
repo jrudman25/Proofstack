@@ -1,11 +1,22 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { getServerSupabaseEnv } from '@/lib/env-server'
+import { isRoutableProfileSlug } from '@/lib/profile-slug-patterns'
 
 export async function updateSession(request: NextRequest) {
   if (request.nextUrl.pathname === '/api' || request.nextUrl.pathname.startsWith('/api/')
     || request.nextUrl.pathname === '/u' || request.nextUrl.pathname.startsWith('/u/')
     || request.nextUrl.pathname === '/robots.txt' || request.nextUrl.pathname === '/sitemap.xml') {
+    // An unroutable /u/<slug> must 404 here: the streamed page's notFound()
+    // cannot change the status once the loading shell has already flushed a
+    // 200. Rewriting to a '_' path is never an app route, so Next renders the
+    // root not-found page with a real 404.
+    const profileSlug = /^\/u\/([^/]+)$/.exec(request.nextUrl.pathname)?.[1]
+    if (profileSlug !== undefined && !isRoutableProfileSlug(profileSlug)) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/_profile-not-found'
+      return NextResponse.rewrite(url, { status: 404 })
+    }
     // Public routes: published profiles render through the service-side
     // retrieval boundary and need no session work on the way in.
     return NextResponse.next({ request })

@@ -1,4 +1,5 @@
 import { ApiError } from './api-validation'
+import { PUBLIC_SLUG_PATTERN } from './profile-slug-patterns'
 import { PUBLISHABLE_BRIEF_FIELDS } from './project-brief'
 import { createAdminClient } from '@/utils/supabase/admin'
 import type { PortfolioBriefing, PublicBriefingSnapshot, PublicProfile, PublishableBriefField } from '@/types'
@@ -14,7 +15,7 @@ import type { PortfolioBriefing, PublicBriefingSnapshot, PublicProfile, Publisha
 // does not exist yet, so is_private rows never enter a public response even
 // when their brief is marked public.
 
-export const PUBLIC_SLUG_PATTERN = /^[a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?$/
+export { PUBLIC_SLUG_PATTERN }
 
 // Note: interview_talking_points is intentionally absent from both lists; it
 // is private interview preparation and is never publishable or selectable.
