@@ -27,6 +27,7 @@ Initial repository evidence includes GitHub metadata, READMEs, root manifests, a
 
 - Private-repository processing must require explicit opt-in and disclose what content is sent to an AI provider.
 - The per-project `ai_opt_in` flag is the consent gate: every AI payload path (chat, briefing, README indexing) must filter or refuse non-consented private projects. Database triggers lock the project row before embedding writes and delete embeddings in the same transaction as revocation; do not bypass or weaken this invariant.
+- `projects.github_deleted_at` is the non-destructive GitHub-deletion marker: every owner, public, AI, and publication read excludes marked rows. Sync upserts and webhook metadata updates clear the marker when GitHub reports the repository again, and owner content (briefs, embeddings, rows) must never be deleted for a GitHub deletion.
 - GitHub sign-in requests `public_repo read:user user:email` only; the broader `repo` scope is requested solely through the explicit "Include private repositories" re-authorization. Do not widen default scopes.
 - Raw private-repository evidence must never enter a public response.
 - Publishing a sanitized description of private work requires explicit owner review.
@@ -70,7 +71,7 @@ npm run build
 npm audit
 ```
 
-Run the checks relevant to the change. Database migration tests in this repository are static checks and do not replace execution against a local or staging PostgreSQL instance. Back up and test restoration before applying schema changes to existing data. `supabase/migrations/20260921000000_retire_legacy_features.sql` contains a destructive column drop (`projects.summary`); back up and execute it against local or staging PostgreSQL before any production application. The hosted Proofstack instance has migration version `20260922041704` (`retire_legacy_features`) applied and verified.
+Run the checks relevant to the change. Database migration tests in this repository are static checks and do not replace execution against a local or staging PostgreSQL instance. Back up and test restoration before applying schema changes to existing data. `supabase/migrations/20260921000000_retire_legacy_features.sql` contains a destructive column drop (`projects.summary`); back up and execute it against local or staging PostgreSQL before any production application. The hosted Proofstack instance has migration version `20260922041704` (`retire_legacy_features`) applied and verified. The hosted Proofstack instance also has migration version `20260923042352` (`mark_deleted_github_repositories`) applied; `projects.github_deleted_at` is verified as a nullable `timestamp with time zone`.
 
 ## Planning
 

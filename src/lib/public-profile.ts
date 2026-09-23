@@ -18,12 +18,13 @@ export const PUBLIC_SLUG_PATTERN = /^[a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?$/
 
 // Note: interview_talking_points is intentionally absent from both lists; it
 // is private interview preparation and is never publishable or selectable.
-const PUBLIC_PROJECT_FIELDS = 'id, name, full_name, description, html_url, homepage, language, technologies, stargazers_count, pushed_at, github_created_at, is_private, github_fork, github_owner_login, github_owner_type'
+const PUBLIC_PROJECT_FIELDS = 'id, name, full_name, description, html_url, homepage, language, technologies, stargazers_count, pushed_at, github_created_at, is_private, github_fork, github_owner_login, github_owner_type, github_deleted_at'
 const PUBLIC_BRIEF_FIELDS = 'visibility, published_fields, lifecycle_status, purpose, inspiration, role_and_contributions, architecture_and_decisions, challenges_and_solutions, outcomes_and_impact, lessons_learned, owner_verified_at'
 
 const PUBLISHABLE_SET: ReadonlySet<string> = new Set<string>(PUBLISHABLE_BRIEF_FIELDS)
 
 const PROJECT_LIMIT = 200
+const PUBLISHED_SLUG_LIMIT = 49_999
 
 type PublicProjectRow = {
   id: string
@@ -41,6 +42,7 @@ type PublicProjectRow = {
   github_fork: boolean
   github_owner_login: string | null
   github_owner_type: 'User' | 'Organization' | null
+  github_deleted_at: string | null
   // PostgREST returns this to-one embed as an object; typed as a union so the
   // array-normalizing guard stays honest.
   project_briefs: BriefRow | BriefRow[] | null
@@ -89,6 +91,20 @@ function parseSnapshot(value: unknown): PublicBriefingSnapshot | null {
   return v as unknown as PublicBriefingSnapshot
 }
 
+export async function getPublishedProfileSlugs(): Promise<string[]> {
+  const admin = createAdminClient()
+  const { data, error } = await admin.from('profiles')
+    .select('public_slug')
+    .eq('profile_published', true)
+    .not('public_slug', 'is', null)
+    .order('public_slug', { ascending: true })
+    .limit(PUBLISHED_SLUG_LIMIT)
+  if (error) throw new ApiError(503, 'Service temporarily unavailable')
+  return ((data || []) as { public_slug: string | null }[])
+    .map(row => row.public_slug)
+    .filter((slug): slug is string => typeof slug === 'string' && PUBLIC_SLUG_PATTERN.test(slug))
+}
+
 export async function getPublicProfile(slug: string): Promise<PublicProfile | null> {
   const normalized = slug.toLowerCase()
   if (!PUBLIC_SLUG_PATTERN.test(normalized)) return null
@@ -106,6 +122,7 @@ export async function getPublicProfile(slug: string): Promise<PublicProfile | nu
     .select(`${PUBLIC_PROJECT_FIELDS}, project_briefs!inner(${PUBLIC_BRIEF_FIELDS})`)
     .eq('user_id', profile.id)
     .eq('is_private', false)
+    .is('github_deleted_at', null)
     .eq('project_briefs.visibility', 'public')
     .order('pushed_at', { ascending: false })
     .limit(PROJECT_LIMIT)
@@ -117,7 +134,7 @@ export async function getPublicProfile(slug: string): Promise<PublicProfile | nu
   // brief embed as an object; the array branch is belt-and-suspenders.
   const visible = ((rows || []) as unknown as PublicProjectRow[])
     .map(row => ({ ...row, project_briefs: Array.isArray(row.project_briefs) ? row.project_briefs[0] ?? null : row.project_briefs }))
-    .filter(row => row.is_private === false && row.project_briefs?.visibility === 'public')
+    .filter(row => row.is_private === false && row.github_deleted_at === null && row.project_briefs?.visibility === 'public')
   const projects = visible.map(row => {
     const brief = row.project_briefs
     const fields: Partial<Record<PublishableBriefField, string | null>> = {}

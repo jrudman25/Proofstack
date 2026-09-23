@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest'
-import { buildPublicBriefingSnapshot, getPublicProfile } from './public-profile'
+import { buildPublicBriefingSnapshot, getPublicProfile, getPublishedProfileSlugs } from './public-profile'
 
 const io = vi.hoisted(() => ({ from: vi.fn(), profileResult: vi.fn(), projectResult: vi.fn(), calls: [] as { method: string; args: unknown[] }[] }))
 vi.mock('@/utils/supabase/admin', () => ({ createAdminClient: () => ({ from: io.from }) }))
@@ -22,6 +22,7 @@ const projectRow = (overrides: Record<string, unknown> = {}) => ({
   language: 'TypeScript', technologies: ['next', 'react'], stargazers_count: 12,
   pushed_at: '2026-09-19T00:00:00.000Z', github_created_at: '2024-01-01T00:00:00Z',
   is_private: false, github_fork: false, github_owner_login: 'octocat', github_owner_type: 'User',
+  github_deleted_at: null,
   project_briefs: {
     visibility: 'public',
     published_fields: ['purpose', 'role_and_contributions'],
@@ -89,6 +90,8 @@ it('constrains the project query to the owner, public repositories, and selected
   expect(eqs).toContainEqual(['user_id', profile.id])
   expect(eqs).toContainEqual(['is_private', false])
   expect(eqs).toContainEqual(['project_briefs.visibility', 'public'])
+  const ises = projectCalls.filter(call => call.method === 'is').map(call => call.args)
+  expect(ises).toContainEqual(['github_deleted_at', null])
 })
 
 it('returns only published brief fields and never leaks raw evidence or internal ids', async () => {
@@ -113,12 +116,13 @@ it('returns only published brief fields and never leaks raw evidence or internal
   ])
 })
 
-it('drops rows that arrive marked private or unselected even if the query slipped', async () => {
+it('drops rows that arrive marked private, tombstoned, or unselected even if the query slipped', async () => {
   io.projectResult.mockReturnValue({
     data: [
       projectRow(),
       projectRow({ id: 'aaa45678-1234-1234-1234-123456789abc', is_private: true, name: 'private-repo' }),
       projectRow({ id: 'bbb45678-1234-1234-1234-123456789abc', name: 'unselected', project_briefs: { ...projectRow().project_briefs, visibility: 'private' } }),
+      projectRow({ id: 'ddd45678-1234-1234-1234-123456789abc', name: 'deleted-repo', github_deleted_at: '2026-09-24T00:00:00.000Z' }),
     ],
     error: null,
   })
@@ -185,4 +189,27 @@ it('treats a malformed stored snapshot as absent rather than leaking it', async 
 it('sanitizes database failures', async () => {
   io.profileResult.mockReturnValue({ data: null, error: new Error('private database details') })
   await expect(getPublicProfile('octocat')).rejects.toThrow('Service temporarily unavailable')
+})
+
+it('lists published profile slugs with a bounded, ordered, non-null query', async () => {
+  io.profileResult.mockReturnValue({ data: [{ public_slug: 'alpha' }, { public_slug: 'beta' }], error: null })
+  expect(await getPublishedProfileSlugs()).toEqual(['alpha', 'beta'])
+  expect(io.calls).toContainEqual({ method: 'select', args: ['public_slug'] })
+  expect(io.calls).toContainEqual({ method: 'eq', args: ['profile_published', true] })
+  expect(io.calls).toContainEqual({ method: 'not', args: ['public_slug', 'is', null] })
+  expect(io.calls).toContainEqual({ method: 'order', args: ['public_slug', { ascending: true }] })
+  expect(io.calls).toContainEqual({ method: 'limit', args: [49_999] })
+})
+
+it('drops stored slugs that are null or no longer match the slug pattern', async () => {
+  io.profileResult.mockReturnValue({
+    data: [{ public_slug: 'ok-slug' }, { public_slug: 'Bad Slug!' }, { public_slug: null }, { public_slug: 42 }],
+    error: null,
+  })
+  expect(await getPublishedProfileSlugs()).toEqual(['ok-slug'])
+})
+
+it('sanitizes slug listing failures', async () => {
+  io.profileResult.mockReturnValue({ data: null, error: new Error('private database details') })
+  await expect(getPublishedProfileSlugs()).rejects.toThrow('Service temporarily unavailable')
 })
