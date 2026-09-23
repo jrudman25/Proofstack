@@ -18,6 +18,7 @@ export type Project = {
   github_owner_type: 'User' | 'Organization' | null
   technologies: string[]
   has_code_map: boolean
+  github_deleted_at: string | null
   created_at: string
   updated_at: string
 }
@@ -48,9 +49,10 @@ export type ProjectBrief = {
 // The subset of owner-authored brief fields surfaced on dashboard cards.
 export type ProjectBriefSummary = Pick<ProjectBrief, 'purpose' | 'lifecycle_status' | 'owner_verified_at'>
 
-// The dashboard needs no user_id, github_repo_id, or has_code_map columns;
-// cards additionally carry the owner brief when one exists.
-export type DashboardProject = Omit<Project, 'user_id' | 'github_repo_id' | 'has_code_map'> & {
+// The dashboard needs no user_id, github_repo_id, has_code_map, or
+// github_deleted_at columns (tombstoned rows are filtered out before they
+// reach the page); cards additionally carry the owner brief when one exists.
+export type DashboardProject = Omit<Project, 'user_id' | 'github_repo_id' | 'has_code_map' | 'github_deleted_at'> & {
   brief: ProjectBriefSummary | null
 }
 

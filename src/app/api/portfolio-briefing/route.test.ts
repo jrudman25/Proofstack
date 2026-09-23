@@ -33,7 +33,7 @@ beforeEach(() => {
   io.embedIn.mockResolvedValue({ data: [{ project_id: projectId, metadata: { pushed_at: '2026-01-02' } }], error: null })
   io.briefingUpsert.mockResolvedValue({ error: null })
   io.from.mockImplementation((table: string) => {
-    if (table === 'projects') return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), order: vi.fn().mockReturnThis(), limit: io.projectLimit }
+    if (table === 'projects') return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), is: vi.fn().mockReturnThis(), order: vi.fn().mockReturnThis(), limit: io.projectLimit }
     if (table === 'project_briefs') return { select: vi.fn().mockReturnThis(), in: io.briefIn }
     if (table === 'project_embeddings') return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), in: io.embedIn }
     return { upsert: io.briefingUpsert }

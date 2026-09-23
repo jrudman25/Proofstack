@@ -24,6 +24,7 @@ export default async function Home() {
       .from('projects')
       .select(`${DASHBOARD_PROJECT_COLUMNS}, project_briefs(purpose, lifecycle_status, owner_verified_at)`)
       .eq('user_id', user.id)
+      .is('github_deleted_at', null)
       .order('pushed_at', { ascending: false }),
     supabase
       .from('profiles')

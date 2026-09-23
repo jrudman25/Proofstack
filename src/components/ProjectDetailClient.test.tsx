@@ -9,7 +9,7 @@ const project: Project = {
   homepage: null, stargazers_count: 0, pushed_at: null, technologies: [],
   is_private: false, ai_opt_in: false, github_created_at: null,
   github_fork: false, github_owner_login: 'owner', github_owner_type: 'User',
-  has_code_map: false, created_at: '2026-01-01', updated_at: '2026-01-01',
+  has_code_map: false, github_deleted_at: null, created_at: '2026-01-01', updated_at: '2026-01-01',
 }
 
 afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.clearAllMocks() })

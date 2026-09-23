@@ -18,7 +18,7 @@ export async function POST() {
     const { supabase, userId } = context
     await enforceRateLimit(context, 'briefing')
     const { data: projects, error: projectError, count } = await supabase.from('projects')
-      .select(EVIDENCE_PROJECT_FIELDS, { count: 'exact' }).eq('user_id', userId)
+      .select(EVIDENCE_PROJECT_FIELDS, { count: 'exact' }).eq('user_id', userId).is('github_deleted_at', null)
       .order('pushed_at', { ascending: false }).limit(PROJECT_LIMIT)
     if (projectError) throw new ApiError(503, 'Service temporarily unavailable')
     if (!projects?.length) throw new ApiError(400, 'Sync GitHub projects before generating a briefing')

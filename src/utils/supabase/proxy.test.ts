@@ -31,3 +31,13 @@ it.each(['/u/octocat', '/u/a-1'])('serves public profile %s without session work
   expect(response.headers.get('location')).toBeNull()
   expect(io.create).not.toHaveBeenCalled()
 })
+it.each(['/robots.txt', '/sitemap.xml'])('serves crawler metadata %s without session work', async path => {
+  const response = await updateSession(new NextRequest(`https://app.test${path}`))
+  expect(response.headers.get('location')).toBeNull()
+  expect(io.create).not.toHaveBeenCalled()
+})
+it('refreshes session state while keeping the help page public', async () => {
+  const response = await updateSession(new NextRequest('https://app.test/help'))
+  expect(response.headers.get('location')).toBeNull()
+  expect(io.getUser).toHaveBeenCalledOnce()
+})

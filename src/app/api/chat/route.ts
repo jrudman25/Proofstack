@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const lastMessage = messages[messages.length - 1].content
     await enforceRateLimit(context, 'chat')
 
-    let projectQuery = supabase.from('projects').select(EVIDENCE_PROJECT_FIELDS, { count: 'exact' }).eq('user_id', userId)
+    let projectQuery = supabase.from('projects').select(EVIDENCE_PROJECT_FIELDS, { count: 'exact' }).eq('user_id', userId).is('github_deleted_at', null)
     if (projectId) projectQuery = projectQuery.eq('id', projectId)
     const { data: projects, error: projectError, count: projectCount } = await projectQuery
       .order('name', { ascending: true }).limit(PROJECT_CONTEXT_LIMIT)

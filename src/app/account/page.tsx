@@ -22,6 +22,7 @@ export default async function AccountPage() {
     supabase.from('projects')
       .select('id, name, is_private, project_briefs(visibility, published_fields)')
       .eq('user_id', user.id)
+      .is('github_deleted_at', null)
       .order('name', { ascending: true }),
   ])
 

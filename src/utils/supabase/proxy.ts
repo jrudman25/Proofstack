@@ -4,7 +4,8 @@ import { getServerSupabaseEnv } from '@/lib/env-server'
 
 export async function updateSession(request: NextRequest) {
   if (request.nextUrl.pathname === '/api' || request.nextUrl.pathname.startsWith('/api/')
-    || request.nextUrl.pathname === '/u' || request.nextUrl.pathname.startsWith('/u/')) {
+    || request.nextUrl.pathname === '/u' || request.nextUrl.pathname.startsWith('/u/')
+    || request.nextUrl.pathname === '/robots.txt' || request.nextUrl.pathname === '/sitemap.xml') {
     // Public routes: published profiles render through the service-side
     // retrieval boundary and need no session work on the way in.
     return NextResponse.next({ request })
@@ -48,7 +49,8 @@ export async function updateSession(request: NextRequest) {
     !user &&
     !request.nextUrl.pathname.startsWith('/login') &&
     !request.nextUrl.pathname.startsWith('/auth') &&
-    !request.nextUrl.pathname.startsWith('/privacy')
+    !request.nextUrl.pathname.startsWith('/privacy') &&
+    !request.nextUrl.pathname.startsWith('/help')
   ) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone()
