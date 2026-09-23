@@ -52,6 +52,7 @@ it('stages the public profile checklist in order and disables publish until prer
   const stateStage = screen.getByRole('heading', { name: /Profile state/ }).closest('li')!
   expect(stateStage).toHaveTextContent('Save a profile URL first.')
   expect(screen.queryByRole('link', { name: /\/u\// })).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Help' })).toHaveAttribute('href', '/help')
 })
 
 it('keeps publishing disabled while no selected project publishes a field', () => {

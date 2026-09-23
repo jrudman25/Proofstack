@@ -47,6 +47,7 @@ it('names search and GitHub links and exposes selected sorting', () => {
   expect(screen.getByRole('combobox', { name: 'Sort projects' })).toHaveValue('name')
   fireEvent.change(screen.getByRole('textbox', { name: 'Search projects and technologies' }), { target: { value: 'missing' } })
   expect(screen.getByText('No projects found')).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Help' })).toHaveAttribute('href', '/help')
 })
 
 it('shows GitHub facts and names the technology icon group', () => {

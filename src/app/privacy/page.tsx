@@ -1,17 +1,31 @@
 import Link from 'next/link'
 import { Logo } from '@/components/icons/Logo'
+import { createClient } from '@/utils/supabase/server'
 
 export const metadata = { title: 'Privacy and data use · Proofstack' }
 
-export default function PrivacyPage() {
+export default async function PrivacyPage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const destination = user ? { href: '/', label: 'Dashboard' } : { href: '/login', label: 'Sign in' }
+
   return (
     <div className="min-h-screen font-sans">
       <header className="border-b border-line bg-ink/90">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <Link href="/" className="flex items-center gap-3">
             <Logo className="h-5 w-5 text-brand" />
             <span className="label font-bold tracking-[0.3em]">Proofstack</span>
           </Link>
+          <nav aria-label="Privacy navigation" className="flex items-center gap-4">
+            <Link href="/help" className="eyebrow inline-flex min-h-10 items-center text-dim transition-colors hover:text-foreground">Help</Link>
+            <Link
+              href={destination.href}
+              className="inline-flex min-h-10 items-center border border-brand-dim bg-brand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-on-brand transition-colors hover:bg-brand/90"
+            >
+              {destination.label}
+            </Link>
+          </nav>
         </div>
       </header>
 
@@ -69,11 +83,8 @@ export default function PrivacyPage() {
 
         <section className="space-y-3 border-t border-line pt-6">
           <p className="text-sm leading-relaxed text-dim">
-            Proofstack is provided as-is, without a formal terms of service. Questions or requests can be sent through the project&apos;s GitHub repository.
+            Proofstack is provided as-is, without a formal terms of service. Questions or requests can be sent through the <a href="https://github.com/jrudman25/Repfolio" target="_blank" rel="noreferrer" className="text-brand underline-offset-2 hover:underline">project&apos;s GitHub repository<span className="sr-only"> (opens in a new tab)</span></a>.
           </p>
-          <Link href="/login" className="eyebrow inline-flex items-center gap-2 text-dim transition-colors hover:text-brand">
-            Back to sign in
-          </Link>
         </section>
       </main>
     </div>

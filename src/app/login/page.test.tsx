@@ -24,6 +24,9 @@ it('presents the value statement, OAuth action, and a truthful illustrative prev
   expect(screen.getByText('Portfolio theme')).toBeInTheDocument()
   expect(screen.getByText('Project spotlight')).toBeInTheDocument()
   expect(screen.getByText('Practice question')).toBeInTheDocument()
+
+  expect(screen.getByRole('link', { name: 'Help' })).toHaveAttribute('href', '/help')
+  expect(screen.getByRole('link', { name: 'Privacy and data use' })).toHaveAttribute('href', '/privacy')
 })
 
 it('requests read-only GitHub scopes through the allow-listed callback', async () => {

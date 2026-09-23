@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/utils/supabase/client'
 import { GithubIcon } from '@/components/icons/GithubIcon'
 import { Logo } from '@/components/icons/Logo'
@@ -110,9 +111,14 @@ export default function LoginPage() {
       <p className="eyebrow mt-8 text-center text-dim">
         GitHub access: public_repo · read:user · user:email
       </p>
-      <a href="/privacy" className="eyebrow mt-3 text-dim transition-colors hover:text-foreground">
-        Privacy and data use
-      </a>
+      <nav aria-label="Site links" className="mt-3 flex items-center gap-4">
+        <Link href="/help" className="eyebrow text-dim transition-colors hover:text-foreground">
+          Help
+        </Link>
+        <Link href="/privacy" className="eyebrow text-dim transition-colors hover:text-foreground">
+          Privacy and data use
+        </Link>
+      </nav>
     </div>
   )
 }

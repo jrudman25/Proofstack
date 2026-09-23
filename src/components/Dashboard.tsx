@@ -811,6 +811,7 @@ export default function Dashboard({
         <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-6 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <span className="eyebrow text-dim">Proofstack v{packageJson.version}</span>
           <div className="flex items-center gap-4">
+            <Link href="/help" className="eyebrow text-dim transition-colors hover:text-foreground">Help</Link>
             <Link href="/privacy" className="eyebrow text-dim transition-colors hover:text-foreground">Privacy</Link>
             <a
               href="https://github.com/jrudman25/Repfolio"
