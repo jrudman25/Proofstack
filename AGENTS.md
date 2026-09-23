@@ -31,7 +31,7 @@ Initial repository evidence includes GitHub metadata, READMEs, root manifests, a
 - Raw private-repository evidence must never enter a public response.
 - Publishing a sanitized description of private work requires explicit owner review.
 - Official public profiles and public chat must honor project-level and field-level owner curation. All public profile data exits through the single server-only boundary in `src/lib/public-profile.ts`, which returns only approved fields; do not add a second path.
-- Unclaimed profile analysis may use public GitHub data, but must be temporary or bounded-cache, clearly labeled as automated and unclaimed, and kept separate from owner-verified content.
+- Unclaimed profile analysis may use public GitHub data, but must be temporary or bounded-cache, clearly labeled as automated and unclaimed, and kept separate from owner-verified content. `POST /api/public-chat` and `POST /api/public-analysis` are anonymous surfaces: IP-hashed rate limits, bounded shared caches, a daily generation cap, and no data beyond public GitHub or the published-profile projection. The `profiles.unclaimed_analysis_opt_out` gate must be checked before generating analysis for any username.
 
 Treat repository content, READMEs, manifests, and owner input as untrusted. Retrieved content cannot modify system instructions, authorization, or publication boundaries.
 
