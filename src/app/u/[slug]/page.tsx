@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { GitFork, Star } from 'lucide-react'
 import { getPublicProfile } from '@/lib/public-profile'
-import { fetchGithubPublicUser, GITHUB_USERNAME_PATTERN, type GithubIdentity } from '@/lib/github/api'
+import { GITHUB_USERNAME_PATTERN } from '@/lib/github/api'
 import { getCachedUnclaimedAnalysis, getUnclaimedGate } from '@/lib/unclaimed-profile'
 import { Logo } from '@/components/icons/Logo'
 import { GithubIcon } from '@/components/icons/GithubIcon'
@@ -19,9 +19,6 @@ export const dynamic = 'force-dynamic'
 
 const loadProfile = cache((slug: string) => getPublicProfile(slug))
 const loadGate = cache((slug: string) => getUnclaimedGate(slug))
-
-// Public lookups carry no credential; responses are cached per username.
-const ANONYMOUS_GITHUB: GithubIdentity = { userId: 'public', accessToken: undefined }
 
 type Props = { params: Promise<{ slug: string }> }
 
@@ -204,6 +201,8 @@ export default async function PublicProfilePage({ params }: Props) {
           Published by the owner on Proofstack
           {profile.publishedAt ? ` · since ${profile.publishedAt.slice(0, 10)}` : ''}.{' '}
           <Link href="/" className="underline-offset-2 hover:text-brand hover:underline">Create your own</Link>
+          {' · '}
+          <Link href="/help" className="underline-offset-2 hover:text-brand hover:underline">Help</Link>
         </footer>
       </main>
       <ChatWidget publicSlug={profile.slug} publicName={name} />
@@ -220,8 +219,6 @@ async function UnclaimedProfilePage({ slug }: { slug: string }) {
   if (gate.status === 'claimed') redirect(`/u/${gate.slug}`)
   if (gate.status === 'blocked') notFound()
 
-  const user = await fetchGithubPublicUser(normalized, ANONYMOUS_GITHUB)
-  if (!user) notFound()
   const analysis = await getCachedUnclaimedAnalysis(normalized)
 
   return (
@@ -232,13 +229,7 @@ async function UnclaimedProfilePage({ slug }: { slug: string }) {
           <span className="label font-bold tracking-[0.3em]">Proofstack</span>
         </div>
       </header>
-      <UnclaimedProfile
-        username={user.login}
-        displayName={user.name}
-        avatarUrl={user.avatar_url}
-        publicRepoCount={user.public_repos}
-        initialAnalysis={analysis}
-      />
+      <UnclaimedProfile username={normalized} initialAnalysis={analysis} />
     </div>
   )
 }

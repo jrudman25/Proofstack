@@ -8,9 +8,6 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: io.replace }) }
 
 const props = {
   username: 'octocat',
-  displayName: 'Octo Cat',
-  avatarUrl: null,
-  publicRepoCount: 3,
   initialAnalysis: null,
 }
 
@@ -30,11 +27,13 @@ afterEach(() => {
 
 it('labels the preview as automated and unclaimed with a generate action', () => {
   render(<UnclaimedProfile {...props} />)
+  expect(screen.getByRole('heading', { name: 'octocat' })).toBeInTheDocument()
   expect(screen.getByRole('heading', { name: 'Automated preview' })).toBeInTheDocument()
   expect(screen.getByText(/Unclaimed profile/)).toBeInTheDocument()
-  expect(screen.getByText(/generated from public GitHub data only/)).toBeInTheDocument()
+  expect(screen.getByText(/has not published a Proofstack profile/)).toBeInTheDocument()
   expect(screen.getByRole('link', { name: /@octocat/ })).toHaveAttribute('href', 'https://github.com/octocat')
   expect(screen.getByRole('link', { name: 'Sign in to claim your profile' })).toHaveAttribute('href', '/login')
+  expect(screen.getByRole('link', { name: 'Help' })).toHaveAttribute('href', '/help')
 })
 
 it('generates and renders an analysis on demand', async () => {

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Sparkles } from 'lucide-react'
@@ -11,14 +10,11 @@ import { clientErrorMessage } from '@/lib/client-error-message'
 import type { UnclaimedAnalysis } from '@/types'
 
 // Visitor-facing automated preview for a GitHub user with no claimed
-// Proofstack profile. Everything rendered here is either public GitHub
-// metadata or generated output; the unclaimed and automated labels are the
-// boundary that keeps it visually distinct from owner-published profiles.
-export default function UnclaimedProfile({ username, displayName, avatarUrl, publicRepoCount, initialAnalysis }: {
+// Proofstack profile. Everything rendered here is generated output or the
+// requested username; the unclaimed and automated labels are the boundary
+// that keeps it visually distinct from owner-published profiles.
+export default function UnclaimedProfile({ username, initialAnalysis }: {
   username: string
-  displayName: string | null
-  avatarUrl: string | null
-  publicRepoCount: number
   initialAnalysis: UnclaimedAnalysis | null
 }) {
   const router = useRouter()
@@ -56,16 +52,11 @@ export default function UnclaimedProfile({ username, displayName, avatarUrl, pub
     }
   }
 
-  const name = displayName || username
-
   return (
     <main className="mx-auto max-w-3xl space-y-8 px-4 py-10 sm:px-6">
       <section className="flex items-center gap-4">
-        {avatarUrl && (
-          <Image src={avatarUrl} alt="" width={56} height={56} className="h-14 w-14 rounded-full border border-line" />
-        )}
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{name}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{username}</h1>
           <a
             href={`https://github.com/${username}`}
             className="mt-0.5 inline-flex items-center gap-1.5 font-mono text-[11px] text-dim transition-colors hover:text-brand"
@@ -83,7 +74,7 @@ export default function UnclaimedProfile({ username, displayName, avatarUrl, pub
           </p>
         </div>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-dim">
-          {name} has not published a Proofstack profile. This preview is generated from public GitHub data only, is cached for up to 24 hours, and may be incomplete. {publicRepoCount} public {publicRepoCount === 1 ? 'repository' : 'repositories'} on GitHub.
+          {username} has not published a Proofstack profile. Generate a temporary preview from public GitHub data. The result is cached for up to 24 hours and may be incomplete.
         </p>
 
         {analysis ? (
@@ -121,8 +112,10 @@ export default function UnclaimedProfile({ username, displayName, avatarUrl, pub
 
       <footer className="border-t border-line pt-5 font-mono text-[10px] text-dim">
         Automated analysis of public GitHub data, not reviewed by the owner.{' '}
-        Are you {name}?{' '}
+        Are you {username}?{' '}
         <Link href="/login" className="underline-offset-2 hover:text-brand hover:underline">Sign in to claim your profile</Link>
+        {' · '}
+        <Link href="/help" className="underline-offset-2 hover:text-brand hover:underline">Help</Link>
       </footer>
     </main>
   )
