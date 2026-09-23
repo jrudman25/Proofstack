@@ -65,7 +65,7 @@ beforeEach(() => {
   io.deleteUser.mockResolvedValue({ error: null })
   defaultFrom()
 })
-afterEach(() => vi.unstubAllEnvs())
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals() })
 it.each(routes)('rejects unverified %s sessions before any downstream I/O', async (_name, route) => {
   io.getUser.mockResolvedValue({ data: { user: null }, error: new Error('invalid') })
   expect((await route()).status).toBe(401)
@@ -332,10 +332,10 @@ it('deletes the authenticated account through the admin client', async () => {
   expect(io.deleteUser).toHaveBeenCalledWith(userId)
 })
 it('sync preserves ownership on every upsert', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify([
+    { id: 42, name: 'project', full_name: 'owner/project', description: null, html_url: 'https://github.com/owner/project', language: null, homepage: null, stargazers_count: 0, pushed_at: null, private: false, created_at: '2025-01-01T00:00:00Z' },
+  ]))))
   io.get.mockImplementation(async (key: string) => {
-    if (key.includes('github-repos')) {
-      return [{ id: 42, name: 'project', full_name: 'owner/project', description: null, html_url: 'https://github.com/owner/project', language: null, homepage: null, stargazers_count: 0, pushed_at: null, is_private: false, github_created_at: null }]
-    }
     if (key.includes('github-token-scopes')) return ['public_repo', 'read:user']
     if (key.includes('github-root-entries')) return { found: true, names: ['package.json'] }
     if (key.includes('github-languages')) return { found: true, languages: [] }

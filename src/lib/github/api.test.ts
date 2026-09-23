@@ -25,16 +25,17 @@ describe('GitHub helpers', () => {
   })
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
-  it('paginates fixed trusted URLs, sends explicit headers and serves validated cache hits', async () => {
+  it('paginates fixed trusted URLs and sends explicit headers on every call', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(response(page(1, 100))).mockResolvedValueOnce(response(page(101, 1)))
     expect(await fetchGithubRepos(identity)).toHaveLength(101)
+    vi.mocked(fetch).mockResolvedValueOnce(response(page(1, 100))).mockResolvedValueOnce(response(page(101, 1)))
     expect(await fetchGithubRepos(identity)).toHaveLength(101)
-    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fetch).toHaveBeenCalledTimes(4)
     expect(fetch).toHaveBeenLastCalledWith('https://api.github.com/user/repos?per_page=100&sort=updated&page=2', expect.objectContaining({
       redirect: 'error', headers: expect.objectContaining({ Authorization: `Bearer ${identity.accessToken}`, 'User-Agent': 'repolio', 'X-GitHub-Api-Version': '2022-11-28' }),
     }))
   })
-  it('isolates repo caches by complete token, user and environment with no token fragments', async () => {
+  it('reads the repository list live without any cache read or write', async () => {
     vi.mocked(fetch).mockImplementation(async () => response([repo(1)]))
     await fetchGithubRepos(identity)
     await fetchGithubRepos({ ...identity, accessToken: 'same-prefix-token-b' })
@@ -42,8 +43,8 @@ describe('GitHub helpers', () => {
     vi.stubEnv('VERCEL_ENV', 'production')
     await fetchGithubRepos(identity)
     expect(fetch).toHaveBeenCalledTimes(4)
-    expect(new Set(io.cache.keys()).size).toBe(4)
-    for (const key of io.cache.keys()) { expect(key).not.toContain('same-prefix'); expect(key).toMatch(/[a-f0-9]{64}$/) }
+    expect(io.get.mock.calls.every(([key]) => !String(key).includes('github-repos'))).toBe(true)
+    expect(io.set.mock.calls.every(([key]) => !String(key).includes('github-repos'))).toBe(true)
   })
   it('isolates README caches for users, complete tokens and anonymous authorization', async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response('private README'))
@@ -60,11 +61,15 @@ describe('GitHub helpers', () => {
     expect(io.set).not.toHaveBeenCalled()
   })
   it('validates cache values too', async () => {
-    io.get.mockResolvedValue([{ id: 1 }])
-    await expect(fetchGithubRepos(identity)).rejects.toThrow('GitHub service temporarily unavailable')
     io.get.mockResolvedValue({ secret: 'not text' })
     await expect(fetchGithubReadme('owner', 'repo', identity)).rejects.toThrow('GitHub service temporarily unavailable')
     expect(fetch).not.toHaveBeenCalled()
+  })
+  it('ignores a poisoned repository list left in cache', async () => {
+    io.get.mockResolvedValue([{ id: 1 }])
+    vi.mocked(fetch).mockResolvedValue(response([repo(5)]))
+    expect(await fetchGithubRepos(identity)).toEqual([expect.objectContaining({ id: 5 })])
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
   it('fails explicitly at the page bound without caching a truncated result', async () => {
     vi.mocked(fetch).mockImplementation(async () => response(page(1, 100)))
@@ -86,20 +91,18 @@ describe('GitHub helpers', () => {
     expect(io.set).not.toHaveBeenCalled()
   })
   it('sanitizes cache write failures rather than returning unconfirmed cache results', async () => {
-    vi.mocked(fetch).mockResolvedValue(response([]))
+    vi.mocked(fetch).mockResolvedValue(new Response('readme'))
     io.set.mockRejectedValue(new Error('secret-redis-write'))
-    await expect(fetchGithubRepos(identity)).rejects.toThrow(/^GitHub service temporarily unavailable$/)
+    await expect(fetchGithubReadme('owner', 'repo', identity)).rejects.toThrow(/^GitHub service temporarily unavailable$/)
   })
-  it('retains private visibility and GitHub creation dates through the cache round-trip', async () => {
-    const privateRepo = { ...repo(7), private: true, created_at: '2024-06-01T00:00:00Z' }
-    vi.mocked(fetch).mockResolvedValue(response([privateRepo]))
-    const fresh = await fetchGithubRepos(identity)
-    expect(fresh).toEqual([expect.objectContaining({ id: 7, is_private: true, github_created_at: '2024-06-01T00:00:00Z' })])
-    const cached = await fetchGithubRepos(identity)
-    expect(cached).toEqual(fresh)
-    expect(fetch).toHaveBeenCalledTimes(1)
+  it('reflects live repository visibility on every call', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response([{ ...repo(7), created_at: '2024-06-01T00:00:00Z' }]))
+    expect(await fetchGithubRepos(identity)).toEqual([expect.objectContaining({ id: 7, is_private: false, github_created_at: '2024-06-01T00:00:00Z' })])
+    vi.mocked(fetch).mockResolvedValueOnce(response([{ ...repo(7), private: true, created_at: '2024-06-01T00:00:00Z' }]))
+    expect(await fetchGithubRepos(identity)).toEqual([expect.objectContaining({ id: 7, is_private: true, github_created_at: '2024-06-01T00:00:00Z' })])
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
-  it('deduplicates repositories repeated across pages before persistence', async () => {
+  it('deduplicates repositories repeated across pages', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(response(page(1, 100))).mockResolvedValueOnce(response([repo(100)]))
     expect(await fetchGithubRepos(identity)).toHaveLength(100)
   })

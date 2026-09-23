@@ -102,6 +102,34 @@ it('shows the last completed catalog sync and the private-repository connection 
   expect(screen.getByRole('button', { name: /Include private repositories/ })).toBeInTheDocument()
 })
 
+it('hides sync-dependent controls and offers a reload when profile state fails to load', () => {
+  render(<Dashboard initialProjects={[project]} lastSyncedAt="2026-03-04T10:00:00.000Z" privateReposConnected={false} profileLoadFailed />)
+  expect(screen.queryByText(/Private repositories are not imported/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Include private repositories/ })).not.toBeInTheDocument()
+  expect(screen.queryByText('Synced 2026-03-04')).not.toBeInTheDocument()
+  expect(screen.getByRole('alert')).toHaveTextContent('Sync status could not be loaded.')
+  fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+  expect(refresh).toHaveBeenCalled()
+})
+
+it('shows the visibility filter only for a loaded private project when profile state fails', () => {
+  const { unmount } = render(<Dashboard initialProjects={[project]} privateReposConnected={false} profileLoadFailed />)
+  expect(screen.queryByRole('group', { name: 'Filter repositories by visibility' })).not.toBeInTheDocument()
+  unmount()
+  render(<Dashboard initialProjects={[{ ...project, is_private: true }]} privateReposConnected={false} profileLoadFailed />)
+  expect(screen.getByRole('group', { name: 'Filter repositories by visibility' })).toBeInTheDocument()
+})
+
+it('keeps the briefing step pending and disables generation when the briefing fails to load', () => {
+  render(<Dashboard initialProjects={[project]} briefingLoadFailed />)
+  const step = checklist().getAllByRole('listitem')[2]
+  expect(step).toHaveTextContent('Prepare a briefing')
+  expect(step).not.toHaveTextContent('Done')
+  expect(within(step).queryByRole('link', { name: 'Go to briefing' })).not.toBeInTheDocument()
+  expect(screen.getByRole('alert')).toHaveTextContent('Your saved briefing could not be loaded.')
+  expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeDisabled()
+})
+
 it('renders bundled brand marks for technologies without devicon glyphs', () => {
   const { container } = render(<Dashboard initialProjects={[{ ...project, language: null, technologies: ['TanStack', 'Upstash', 'Neon', 'Gemini', 'HeroUI'] }]} />)
   for (const tech of ['TanStack', 'Upstash', 'Neon', 'Gemini', 'HeroUI']) {

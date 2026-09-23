@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { readBodyBytes } from '@/lib/read-body'
 import { createClient } from '@supabase/supabase-js'
 import { getServerSupabaseEnv, getSupabaseServiceKey, getWebhookSecret } from '@/lib/env-server'
+import { createRedis, redisKey } from '@/lib/redis'
 
 export const runtime = 'nodejs'
 
@@ -96,47 +97,75 @@ export async function POST(request: Request) {
     }
     const repo = payload.repository
 
-    // Using service role key because webhooks are not authenticated as users
-    const { url } = getServerSupabaseEnv()
-    const serviceKey = getSupabaseServiceKey()
-    const supabase = createClient(
-      url,
-      serviceKey, // Use service role for webhooks
-      { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
-    )
-
-    if (event === 'repository' && payload.action === 'deleted') {
-      const now = new Date().toISOString()
-      const { error } = await supabase.from('projects')
-        .update({ github_deleted_at: now, updated_at: now })
-        .eq('github_repo_id', repo.id)
-      if (error) throw error
-      return NextResponse.json({ received: true })
+    const deliveryId = request.headers.get('x-github-delivery')
+    if (!deliveryId || !/^[A-Za-z0-9-]{1,100}$/.test(deliveryId)) {
+      return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
     }
 
-    // We need to find if this repo exists in our DB, and who it belongs to
-    // Update existing project
-    // Visibility and ownership fields matter as much as the metadata: a
-    // repository made private on GitHub must drop off public profiles and AI
-    // payloads immediately (the consent trigger removes its embeddings), not
-    // wait for the owner's next manual sync. GitHub reporting the repository
-    // again also clears any tombstone.
-    const { error } = await supabase.from('projects').update({
-      name: repo.name,
-      full_name: repo.full_name,
-      description: repo.description,
-      html_url: repo.html_url,
-      language: repo.language,
-      stargazers_count: repo.stargazers_count,
-      pushed_at: repo.pushed_at,
-      is_private: repo.private,
-      github_fork: repo.fork,
-      github_owner_login: repo.owner.login,
-      github_owner_type: repo.owner.type === 'User' || repo.owner.type === 'Organization' ? repo.owner.type : null,
-      github_deleted_at: null,
-      updated_at: new Date().toISOString()
-    }).eq('github_repo_id', repo.id)
-    if (error) throw error
+    // GitHub redelivers webhooks; claim the delivery id so a retry never
+    // repeats the database write. Failing closed skips the write entirely.
+    let redis: ReturnType<typeof createRedis> | null = null
+    let deliveryKey = ''
+    try {
+      deliveryKey = redisKey({ userId: 'public' }, 'github-webhook-delivery', deliveryId)
+      redis = createRedis()
+      const claimed = await redis.set(deliveryKey, 1, { nx: true, ex: 259200 })
+      if (claimed === null) return NextResponse.json({ received: true, duplicate: true })
+    } catch {
+      return NextResponse.json({ error: 'Webhook processing unavailable' }, { status: 503 })
+    }
+
+    try {
+      // Using service role key because webhooks are not authenticated as users
+      const { url } = getServerSupabaseEnv()
+      const serviceKey = getSupabaseServiceKey()
+      const supabase = createClient(
+        url,
+        serviceKey, // Use service role for webhooks
+        { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
+      )
+
+      if (event === 'repository' && payload.action === 'deleted') {
+        const now = new Date().toISOString()
+        const { error } = await supabase.from('projects')
+          .update({ github_deleted_at: now, updated_at: now })
+          .eq('github_repo_id', repo.id)
+        if (error) throw error
+        return NextResponse.json({ received: true })
+      }
+
+      // We need to find if this repo exists in our DB, and who it belongs to
+      // Update existing project
+      // Visibility and ownership fields matter as much as the metadata: a
+      // repository made private on GitHub must drop off public profiles and AI
+      // payloads immediately (the consent trigger removes its embeddings), not
+      // wait for the owner's next manual sync. GitHub reporting the repository
+      // again also clears any tombstone. A stale push payload must never
+      // downgrade visibility, so is_private flips to false only on an explicit
+      // publicized event.
+      const { error } = await supabase.from('projects').update({
+        name: repo.name,
+        full_name: repo.full_name,
+        description: repo.description,
+        html_url: repo.html_url,
+        language: repo.language,
+        stargazers_count: repo.stargazers_count,
+        pushed_at: repo.pushed_at,
+        ...(repo.private ? { is_private: true }
+          : event === 'repository' && payload.action === 'publicized' ? { is_private: false }
+          : {}),
+        github_fork: repo.fork,
+        github_owner_login: repo.owner.login,
+        github_owner_type: repo.owner.type === 'User' || repo.owner.type === 'Organization' ? repo.owner.type : null,
+        github_deleted_at: null,
+        updated_at: new Date().toISOString()
+      }).eq('github_repo_id', repo.id)
+      if (error) throw error
+    } catch (error) {
+      // Release the delivery claim so GitHub's redelivery can retry the write.
+      try { await redis?.del(deliveryKey) } catch { /* best effort */ }
+      throw error
+    }
 
     // TODO: We could trigger a new Gemini summary generation if pushed_at changed significantly
     return NextResponse.json({ received: true })

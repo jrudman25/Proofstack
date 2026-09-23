@@ -50,8 +50,10 @@ export function objectBody(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export function parseProjectId(value: unknown): string {
-  if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
     throw new ApiError(400, 'Invalid projectId')
   }
   return value.toLowerCase()

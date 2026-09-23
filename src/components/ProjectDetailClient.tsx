@@ -8,6 +8,7 @@ import { Logo } from '@/components/icons/Logo'
 import { Button } from '@/components/ui/button'
 import { languageColor } from '@/lib/language-colors'
 import { clientErrorMessage } from '@/lib/client-error-message'
+import StatusMessage, { type StatusNotice } from '@/components/StatusMessage'
 import Link from 'next/link'
 import ProjectBriefEditor from '@/components/ProjectBriefEditor'
 import ChatWidget from '@/components/ChatWidget'
@@ -26,11 +27,11 @@ export default function ProjectDetailClient({
   readmeIndexedPushedAt?: string | null,
 }) {
   const [aiOptIn, setAiOptIn] = useState(project.ai_opt_in)
-  const [consentMessage, setConsentMessage] = useState('')
+  const [consentMessage, setConsentMessage] = useState<StatusNotice | null>(null)
   const [isConsentSaving, setIsConsentSaving] = useState(false)
   const [indexStatus, setIndexStatus] = useState<'idle' | 'working' | 'done' | 'failed'>(readmeIndexExists ? 'done' : 'idle')
   const [indexStale, setIndexStale] = useState(readmeIndexExists && readmeIndexedPushedAt !== project.pushed_at)
-  const [indexMessage, setIndexMessage] = useState('')
+  const [indexMessage, setIndexMessage] = useState<StatusNotice | null>(null)
   const [briefDirty, setBriefDirty] = useState(false)
 
   const aiEnabled = !project.is_private || aiOptIn
@@ -43,7 +44,7 @@ export default function ProjectDetailClient({
 
   const handleConsent = async (next: boolean) => {
     setIsConsentSaving(true)
-    setConsentMessage('')
+    setConsentMessage(null)
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: 'PATCH',
@@ -52,15 +53,18 @@ export default function ProjectDetailClient({
       })
       const data = await res.json()
       if (!res.ok) {
-        setConsentMessage(clientErrorMessage(res, data, 'Unable to update AI consent. Please try again.'))
+        setConsentMessage({ text: clientErrorMessage(res, data, 'Unable to update AI consent. Please try again.'), tone: 'error' })
         return
       }
       setAiOptIn(next)
-      setConsentMessage(next
-        ? 'AI processing enabled for this repository.'
-        : 'AI processing disabled. Embedded README evidence was removed.')
+      setConsentMessage({
+        text: next
+          ? 'AI processing enabled for this repository.'
+          : 'AI processing disabled. Embedded README evidence was removed.',
+        tone: 'info',
+      })
     } catch {
-      setConsentMessage('Unable to update AI consent. Please try again.')
+      setConsentMessage({ text: 'Unable to update AI consent. Please try again.', tone: 'error' })
     } finally {
       setIsConsentSaving(false)
     }
@@ -68,26 +72,26 @@ export default function ProjectDetailClient({
 
   const handleIndex = async () => {
     setIndexStatus('working')
-    setIndexMessage('')
+    setIndexMessage(null)
     try {
       const res = await fetch(`/api/projects/${project.id}/index`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) {
         setIndexStatus('failed')
-        setIndexMessage(clientErrorMessage(res, data, 'Unable to index the README. Please try again.'))
+        setIndexMessage({ text: clientErrorMessage(res, data, 'Unable to index the README. Please try again.'), tone: 'error' })
         return
       }
       if (data.indexed) {
         setIndexStatus('done')
         setIndexStale(false)
-        setIndexMessage('README indexed for chat and briefings.')
+        setIndexMessage({ text: 'README indexed for chat and briefings.', tone: 'info' })
       } else {
         setIndexStatus('failed')
-        setIndexMessage('No README found for this repository.')
+        setIndexMessage({ text: 'No README found for this repository.', tone: 'error' })
       }
     } catch {
       setIndexStatus('failed')
-      setIndexMessage('Unable to index the README. Please try again.')
+      setIndexMessage({ text: 'Unable to index the README. Please try again.', tone: 'error' })
     }
   }
 
@@ -189,7 +193,7 @@ export default function ProjectDetailClient({
                   <p className="mt-1 max-w-2xl text-sm leading-relaxed text-dim">
                     Enabling AI processing sends this repository&apos;s metadata and README to Gemini for briefings, chat, and indexing. Raw private evidence never appears outside your workspace.
                   </p>
-                  {consentMessage && <p role="status" className="mt-2 font-mono text-[11px] text-dim">{consentMessage}</p>}
+                  {consentMessage && <StatusMessage tone={consentMessage.tone} className="mt-2">{consentMessage.text}</StatusMessage>}
                 </div>
                 <Button
                   variant={aiOptIn ? 'outline' : 'default'}
@@ -212,7 +216,7 @@ export default function ProjectDetailClient({
                       : 'The README is indexed and available to chat and briefings.'
                     : 'Index the README so chat and briefings can cite its contents.'}
                 </p>
-                {indexMessage && <p role="status" className="mt-2 font-mono text-[11px] text-dim">{indexMessage}</p>}
+                {indexMessage && <StatusMessage tone={indexMessage.tone} className="mt-2">{indexMessage.text}</StatusMessage>}
               </div>
               <Button
                 variant="outline"

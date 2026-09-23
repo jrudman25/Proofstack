@@ -1,7 +1,10 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import PortfolioBriefingPanel from './PortfolioBriefingPanel'
 import type { PortfolioBriefing } from '@/types'
+
+const refresh = vi.fn()
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
 const briefing: PortfolioBriefing = {
   summary: 'A portfolio focused on web engineering.',
@@ -13,7 +16,7 @@ const briefing: PortfolioBriefing = {
   citations: [{ projectId: 'p1', name: 'Example', url: 'https://github.com/owner/Example', evidence: ['github', 'owner'] }],
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); refresh.mockClear() })
 
 it('generates and presents a briefing with provenance labels and internal project links', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ briefing, generatedAt: '2026-09-14T00:00:00.000Z' }) }))
@@ -42,8 +45,28 @@ it('notifies the parent after a successful generation but not after a failure', 
   expect(await screen.findByText(briefing.summary)).toBeInTheDocument()
   expect(onGenerated).toHaveBeenCalledOnce()
   fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
   expect(await screen.findByRole('status')).toHaveTextContent('Unable to generate your briefing. Please try again.')
   expect(onGenerated).toHaveBeenCalledOnce()
+})
+
+it('confirms before replacing an existing briefing', async () => {
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ briefing, generatedAt: '2026-09-21T00:00:00.000Z' }) })
+  vi.stubGlobal('fetch', fetchMock)
+  render(<PortfolioBriefingPanel projectCount={1}
+    initial={{ briefing, generatedAt: '2026-09-10T00:00:00.000Z', changedCount: 0 }} />)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+  expect(screen.getByText('Replace current briefing?')).toBeInTheDocument()
+  expect(fetchMock).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByText('Replace current briefing?')).not.toBeInTheDocument()
+  expect(fetchMock).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/portfolio-briefing', { method: 'POST' }))
 })
 
 it('anchors the briefing section for onboarding deep links', () => {
@@ -51,18 +74,29 @@ it('anchors the briefing section for onboarding deep links', () => {
   expect(container.querySelector('#interview-briefing')).not.toBeNull()
 })
 
-it('keeps a persisted briefing compact until the user expands it', () => {
+it('renders a persisted briefing expanded with practice questions and collapses on request', () => {
   render(<PortfolioBriefingPanel projectCount={2}
     initial={{ briefing, generatedAt: '2026-09-10T00:00:00.000Z', changedCount: 1 }} />)
-  expect(screen.queryByText(briefing.summary)).not.toBeInTheDocument()
+  expect(screen.getByText(briefing.summary)).toBeInTheDocument()
+  const question = screen.getByText('Why did you choose this architecture?')
+  expect(question.closest('details')).toBeNull()
+  expect(screen.getByText('Recurring themes').closest('details')).not.toBeNull()
   expect(screen.getByText(/AI-generated 2026-09-10/)).toBeInTheDocument()
   expect(screen.getByText(/1 repository changed/)).toBeInTheDocument()
-  const toggle = screen.getByRole('button', { name: 'Show briefing' })
-  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  const toggle = screen.getByRole('button', { name: 'Hide briefing' })
+  expect(toggle).toHaveAttribute('aria-expanded', 'true')
   fireEvent.click(toggle)
-  expect(screen.getByText(briefing.summary)).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Hide briefing' })).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.queryByText(briefing.summary)).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Show briefing' })).toHaveAttribute('aria-expanded', 'false')
   expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument()
+})
+
+it('disables generation and offers a reload when the stored briefing failed to load', () => {
+  render(<PortfolioBriefingPanel projectCount={1} loadFailed />)
+  expect(screen.getByRole('alert')).toHaveTextContent('Your saved briefing could not be loaded.')
+  expect(screen.getByRole('button', { name: 'Prepare briefing' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+  expect(refresh).toHaveBeenCalledOnce()
 })
 
 it('disables generation and explains the prerequisite when no projects are synced', () => {

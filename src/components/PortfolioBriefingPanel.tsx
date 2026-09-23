@@ -2,9 +2,11 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { BookOpen, ChevronDown, ExternalLink, RefreshCw } from 'lucide-react'
 import type { PortfolioBriefing, StoredBriefing } from '@/types'
 import { Button } from '@/components/ui/button'
+import StatusMessage, { type StatusNotice } from '@/components/StatusMessage'
 import { clientErrorMessage } from '@/lib/client-error-message'
 
 const isoDate = (value: string | null | undefined) => {
@@ -28,23 +30,25 @@ function ProjectLink({ projectId, name, url }: { projectId: string; name: string
   )
 }
 
-export default function PortfolioBriefingPanel({ projectCount, initial, onGenerated }: { projectCount?: number; initial?: StoredBriefing | null; onGenerated?: () => void }) {
+export default function PortfolioBriefingPanel({ projectCount, initial, onGenerated, loadFailed = false }: { projectCount?: number; initial?: StoredBriefing | null; onGenerated?: () => void; loadFailed?: boolean }) {
+  const router = useRouter()
   const [briefing, setBriefing] = useState<PortfolioBriefing | null>(initial?.briefing ?? null)
   const [generatedAt, setGeneratedAt] = useState<string | null>(initial?.generatedAt ?? null)
   const [changedCount, setChangedCount] = useState(initial?.changedCount ?? 0)
   const [isLoading, setIsLoading] = useState(false)
-  const [isExpanded, setIsExpanded] = useState(false)
-  const [message, setMessage] = useState('')
+  const [isExpanded, setIsExpanded] = useState(Boolean(initial?.briefing))
+  const [confirmingReplace, setConfirmingReplace] = useState(false)
+  const [message, setMessage] = useState<StatusNotice | null>(null)
   const hasProjects = projectCount === undefined || projectCount > 0
 
   const generate = async () => {
     setIsLoading(true)
-    setMessage('')
+    setMessage(null)
     try {
       const response = await fetch('/api/portfolio-briefing', { method: 'POST' })
       const result = await response.json()
       if (!response.ok) {
-        setMessage(clientErrorMessage(response, result, 'Unable to generate your briefing. Please try again.'))
+        setMessage({ text: clientErrorMessage(response, result, 'Unable to generate your briefing. Please try again.'), tone: 'error' })
         return
       }
       if (!result.briefing) throw new Error('Briefing unavailable')
@@ -54,7 +58,7 @@ export default function PortfolioBriefingPanel({ projectCount, initial, onGenera
       setIsExpanded(true)
       onGenerated?.()
     } catch {
-      setMessage('Unable to generate your briefing. Please try again.')
+      setMessage({ text: 'Unable to generate your briefing. Please try again.', tone: 'error' })
     } finally {
       setIsLoading(false)
     }
@@ -96,14 +100,52 @@ export default function PortfolioBriefingPanel({ projectCount, initial, onGenera
               <ChevronDown className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
             </Button>
           )}
-          <Button onClick={generate} disabled={isLoading || !hasProjects} size="sm" className="eyebrow">
-            {isLoading ? <RefreshCw className="animate-spin" /> : <BookOpen />}
-            {briefing ? 'Regenerate' : 'Prepare briefing'}
-          </Button>
+          {confirmingReplace ? (
+            <span className="flex items-center gap-2">
+              <span className="text-xs text-dim">Replace current briefing?</span>
+              <Button
+                size="sm"
+                className="eyebrow"
+                onClick={() => { setConfirmingReplace(false); void generate() }}
+              >
+                Replace
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="eyebrow"
+                onClick={() => setConfirmingReplace(false)}
+              >
+                Cancel
+              </Button>
+            </span>
+          ) : (
+            <Button
+              variant={briefing ? 'outline' : 'default'}
+              onClick={() => (briefing ? setConfirmingReplace(true) : void generate())}
+              disabled={isLoading || !hasProjects || loadFailed}
+              size="sm"
+              className="eyebrow"
+            >
+              {isLoading ? <RefreshCw className="animate-spin" /> : <BookOpen />}
+              {briefing ? 'Regenerate' : 'Prepare briefing'}
+            </Button>
+          )}
         </div>
       </div>
 
-      {message && <p role="status" className="border-t border-line px-5 py-3 font-mono text-[11px] text-dim">{message}</p>}
+      {loadFailed && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
+          <p className="text-sm text-dim">
+            Your saved briefing could not be loaded. Reload to try again; generating now could replace it.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => router.refresh()} className="eyebrow shrink-0">
+            <RefreshCw className="h-3.5 w-3.5" /> Reload
+          </Button>
+        </div>
+      )}
+
+      {message && <StatusMessage tone={message.tone} className="border-t border-line px-5 py-3">{message.text}</StatusMessage>}
 
       {briefing && isExpanded && (
         <div id="briefing-content" className="border-t border-line">
@@ -143,10 +185,17 @@ export default function PortfolioBriefingPanel({ projectCount, initial, onGenera
             </div>
           </div>
 
+          <div className="border-t border-line p-5">
+            <h3 className="label text-dim">Practice questions</h3>
+            <ol className="mt-2 space-y-2 text-sm text-foreground/90">
+              {briefing.interviewQuestions.map((question, index) => <li key={question}><span className="mr-2 font-mono text-[10px] text-brand">{String(index + 1).padStart(2, '0')}</span>{question}</li>)}
+            </ol>
+          </div>
+
           <details className="group border-t border-line">
             <summary className="label cursor-pointer select-none px-5 py-3 text-dim transition-colors hover:text-foreground">
               Supporting detail
-              <span className="ml-3 font-normal normal-case tracking-normal text-dim">Themes, growth, evidence gaps, and practice questions</span>
+              <span className="ml-3 font-normal normal-case tracking-normal text-dim">Themes, growth, and evidence gaps</span>
             </summary>
             <div className="grid border-t border-line lg:grid-cols-2">
               <div className="space-y-4 border-b border-line p-5 lg:border-b-0 lg:border-r">
@@ -169,17 +218,11 @@ export default function PortfolioBriefingPanel({ projectCount, initial, onGenera
                   <h3 className="label text-dim">Growth narrative</h3>
                   <p className="mt-2 text-sm leading-relaxed text-foreground/90">{briefing.growth}</p>
                 </div>
-                <div className="border-b border-line p-5">
+                <div className="p-5">
                   <h3 className="label text-dim">Evidence gaps</h3>
                   <ul className="mt-2 space-y-2 text-sm text-dim">
                     {briefing.evidenceGaps.map(gap => <li key={gap}>{gap}</li>)}
                   </ul>
-                </div>
-                <div className="p-5">
-                  <h3 className="label text-dim">Practice questions</h3>
-                  <ol className="mt-2 space-y-2 text-sm text-foreground/90">
-                    {briefing.interviewQuestions.map((question, index) => <li key={question}><span className="mr-2 font-mono text-[10px] text-brand">{String(index + 1).padStart(2, '0')}</span>{question}</li>)}
-                  </ol>
                 </div>
               </div>
             </div>

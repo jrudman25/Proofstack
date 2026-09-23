@@ -15,6 +15,7 @@ import { clientErrorMessage } from '@/lib/client-error-message'
 import Link from 'next/link'
 import Image from 'next/image'
 import PortfolioBriefingPanel from '@/components/PortfolioBriefingPanel'
+import StatusMessage, { type StatusNotice } from '@/components/StatusMessage'
 import ChatWidget from '@/components/ChatWidget'
 import packageJson from '../../package.json'
 
@@ -243,6 +244,8 @@ export default function Dashboard({
   privateReposConnected = true,
   initialBriefing = null,
   loadError = false,
+  profileLoadFailed = false,
+  briefingLoadFailed = false,
 }: {
   initialProjects: DashboardProject[]
   user?: DashboardUser | null
@@ -250,6 +253,8 @@ export default function Dashboard({
   privateReposConnected?: boolean
   initialBriefing?: StoredBriefing | null
   loadError?: boolean
+  profileLoadFailed?: boolean
+  briefingLoadFailed?: boolean
 }) {
   const router = useRouter()
   // Read server-provided projects directly so router.refresh() actually
@@ -260,8 +265,8 @@ export default function Dashboard({
   const [repositoryVisibility, setRepositoryVisibility] = useState<'all' | 'public' | 'private'>('all')
   const [projectPage, setProjectPage] = useState(1)
   const [isSyncing, setIsSyncing] = useState(false)
-  const [syncMessage, setSyncMessage] = useState('')
-  const [connectMessage, setConnectMessage] = useState('')
+  const [syncMessage, setSyncMessage] = useState<StatusNotice | null>(null)
+  const [connectMessage, setConnectMessage] = useState<StatusNotice | null>(null)
   const [connectPending, setConnectPending] = useState(false)
   const [projectOpened, setProjectOpened] = useState(false)
   const [gettingStartedDismissed, setGettingStartedDismissed] = useState(false)
@@ -279,7 +284,7 @@ export default function Dashboard({
 
   const handleSync = async (connectPrivate = false) => {
     setIsSyncing(true)
-    setSyncMessage('')
+    setSyncMessage(null)
     try {
       const res = await fetch('/api/sync', {
         method: 'POST',
@@ -294,13 +299,13 @@ export default function Dashboard({
           : data.enrichmentFailures > 0
             ? ` ${data.enrichmentFailures} ${data.enrichmentFailures === 1 ? 'repository' : 'repositories'} synced without manifest evidence.`
             : ''
-        setSyncMessage(`Synced ${data.syncedCount} projects.${incomplete}`)
+        setSyncMessage({ text: `Synced ${data.syncedCount} projects.${incomplete}`, tone: 'info' })
         router.refresh()
       } else {
-        setSyncMessage(clientErrorMessage(res, data, 'Unable to sync projects. Please try again.'))
+        setSyncMessage({ text: clientErrorMessage(res, data, 'Unable to sync projects. Please try again.'), tone: 'error' })
       }
     } catch {
-      setSyncMessage('Unable to sync projects. Please try again.')
+      setSyncMessage({ text: 'Unable to sync projects. Please try again.', tone: 'error' })
     } finally {
       setIsSyncing(false)
     }
@@ -329,7 +334,7 @@ export default function Dashboard({
   // Upgrades the GitHub grant from public_repo to repo so private
   // repositories can be imported; the user returns to the dashboard.
   const handleConnectPrivate = async () => {
-    setConnectMessage('')
+    setConnectMessage(null)
     setConnectPending(true)
     try {
       sessionStorage.setItem(CONNECT_PRIVATE_PENDING, '1')
@@ -347,7 +352,7 @@ export default function Dashboard({
     } catch {
       sessionStorage.removeItem(CONNECT_PRIVATE_PENDING)
       setConnectPending(false)
-      setConnectMessage('Unable to start GitHub authorization. Please try again.')
+      setConnectMessage({ text: 'Unable to start GitHub authorization. Please try again.', tone: 'error' })
     }
   }
 
@@ -467,7 +472,7 @@ export default function Dashboard({
                 {isSyncing ? 'Importing repositories' : 'Import from GitHub'}
               </Button>
             </div>
-            {syncMessage && <p role="status" className="mt-4 font-mono text-[11px] text-dim">{syncMessage}</p>}
+            {syncMessage && <StatusMessage tone={syncMessage.tone} className="mt-4">{syncMessage.text}</StatusMessage>}
           </section>
         ) : !loadError ? (
           <>
@@ -508,8 +513,8 @@ export default function Dashboard({
                     {
                       title: 'Prepare a briefing',
                       detail: 'Generate themes, spotlights, and practice questions.',
-                      done: briefingReady,
-                      action: (
+                      done: briefingReady && !briefingLoadFailed,
+                      action: briefingLoadFailed ? null : (
                         <a href="#interview-briefing" className="eyebrow mt-2 inline-block text-brand transition-colors hover:underline">
                           Go to briefing
                         </a>
@@ -528,7 +533,7 @@ export default function Dashboard({
                 </ol>
               </section>
             )}
-            <PortfolioBriefingPanel projectCount={projects.length} initial={initialBriefing} onGenerated={() => setBriefingGenerated(true)} />
+            <PortfolioBriefingPanel projectCount={projects.length} initial={initialBriefing} onGenerated={() => setBriefingGenerated(true)} loadFailed={briefingLoadFailed} />
           </>
         ) : null}
 
@@ -543,7 +548,7 @@ export default function Dashboard({
               </span>
             </div>
             <div className="flex items-center gap-3">
-              {lastSyncedAt && (
+              {lastSyncedAt && !profileLoadFailed && (
                 <span className="hidden whitespace-nowrap font-mono text-[10px] text-dim sm:inline">Synced {isoDate(lastSyncedAt)}</span>
               )}
               <Button
@@ -576,7 +581,7 @@ export default function Dashboard({
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              {privateReposConnected && (
+              {(profileLoadFailed ? projects.some(project => project.is_private) : privateReposConnected) && (
                 <div role="group" aria-label="Filter repositories by visibility" className="flex divide-x divide-line border border-line">
                   {(['all', 'public', 'private'] as const).map(visibility => (
                     <button
@@ -607,17 +612,26 @@ export default function Dashboard({
             </div>
           </div>
 
-          {syncMessage && (
-            <p role="status" className="mt-2 font-mono text-[11px] text-dim">{syncMessage}</p>
+          {profileLoadFailed && (
+            <div role="alert" className="mt-3 flex flex-wrap items-center gap-3">
+              <p className="text-sm text-dim">Sync status could not be loaded.</p>
+              <Button variant="outline" size="sm" onClick={() => router.refresh()} className="eyebrow">
+                <RefreshCw className="h-3.5 w-3.5" /> Reload
+              </Button>
+            </div>
           )}
 
-          {!privateReposConnected && (
+          {syncMessage && (
+            <StatusMessage tone={syncMessage.tone} className="mt-2">{syncMessage.text}</StatusMessage>
+          )}
+
+          {!privateReposConnected && !profileLoadFailed && (
             <div className="mt-3 flex flex-col gap-2 border-l border-brand-dim pl-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="font-mono text-[11px] text-dim">
                 Private repositories are not imported. Grant read access to include them in your private workspace.
               </p>
               <div className="flex items-center gap-3">
-                {connectMessage && <span role="status" className="font-mono text-[11px] text-dim">{connectMessage}</span>}
+                {connectMessage && <StatusMessage tone={connectMessage.tone}>{connectMessage.text}</StatusMessage>}
                 <Button variant="outline" size="sm" onClick={handleConnectPrivate} disabled={connectPending} className="eyebrow shrink-0">
                   <Lock className="h-3.5 w-3.5" /> {connectPending ? 'Redirecting to GitHub' : 'Include private repositories'}
                 </Button>

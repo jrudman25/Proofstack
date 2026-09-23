@@ -38,6 +38,11 @@ export default async function Home() {
       .maybeSingle(),
   ])
 
+  const profileLoadFailed = Boolean(profileResult.error)
+  const briefingLoadFailed = Boolean(briefingResult.error)
+  if (profileLoadFailed) console.error('Error fetching profile')
+  if (briefingLoadFailed) console.error('Error fetching briefing')
+
   const meta = user.user_metadata as Record<string, unknown> | undefined
   const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : null)
   const dashboardUser = {
@@ -76,6 +81,8 @@ export default async function Home() {
       lastSyncedAt={profileResult.data?.last_catalog_sync_at ?? null}
       privateReposConnected={profileResult.data?.github_private_scope === true}
       initialBriefing={initialBriefing}
+      profileLoadFailed={profileLoadFailed}
+      briefingLoadFailed={briefingLoadFailed}
     />
   )
 }

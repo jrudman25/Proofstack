@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Check, Pencil, Save } from 'lucide-react'
 import { BRIEF_BODY_BYTES, BRIEF_FIELD_LIMIT, BRIEF_TOTAL_LIMIT, PUBLISHABLE_BRIEF_FIELDS } from '@/lib/project-brief'
 import { clientErrorMessage } from '@/lib/client-error-message'
+import StatusMessage, { type StatusNotice } from '@/components/StatusMessage'
 
 const NARRATIVE_FIELDS = [
   { key: 'purpose', label: 'Purpose', prompt: 'What problem does this project solve, and for whom?', primary: true },
@@ -64,11 +65,12 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
   initialBrief?: ProjectBrief | null
   onDirtyChange?: (dirty: boolean) => void
 }) {
+  const [savedBrief, setSavedBrief] = useState<ProjectBrief | null>(initialBrief ?? null)
   const [form, setForm] = useState(() => initialForm(initialBrief))
   const [saved, setSaved] = useState(() => ({ snapshot: serialize(initialForm(initialBrief)), updatedAt: initialBrief?.updated_at ?? null }))
   const [editing, setEditing] = useState(() => !hasContent(initialBrief))
   const [isSaving, setIsSaving] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState<StatusNotice | null>(null)
   const [conflict, setConflict] = useState(false)
   const [lastReviewed, setLastReviewed] = useState(initialBrief?.last_reviewed_at ?? null)
   const [publicationOpen, setPublicationOpen] = useState(false)
@@ -111,13 +113,13 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (payloadBytes() > BRIEF_BODY_BYTES) {
-      setMessage(`The brief is too large to save. Keep the total under ${BRIEF_TOTAL_LIMIT.toLocaleString()} characters.`)
+      setMessage({ text: `The brief is too large to save. Keep the total under ${BRIEF_TOTAL_LIMIT.toLocaleString()} characters.`, tone: 'error' })
       return
     }
     const submitted = formRef.current
     const baseUpdatedAt = savedRef.current.updatedAt
     setIsSaving(true)
-    setMessage('')
+    setMessage(null)
     setConflict(false)
     try {
       const response = await fetch(`/api/projects/${projectId}/brief`, {
@@ -128,14 +130,15 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
       const result = await response.json()
       if (response.status === 409) {
         setConflict(true)
-        setMessage('This brief was updated elsewhere. Reload the latest version before saving.')
+        setMessage({ text: 'This brief was updated elsewhere. Reload the latest version before saving.', tone: 'error' })
         return
       }
       if (!response.ok) {
-        setMessage(clientErrorMessage(response, result, 'Unable to save the project brief. Please try again.'))
+        setMessage({ text: clientErrorMessage(response, result, 'Unable to save the project brief. Please try again.'), tone: 'error' })
         return
       }
       const brief = result.brief as ProjectBrief
+      setSavedBrief(brief)
       setLastReviewed(brief.last_reviewed_at)
       // If the owner kept typing during the save, the form is ahead of the
       // saved snapshot: keep the newer text and mark it unsaved instead of
@@ -143,10 +146,10 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
       const submittedSnapshot = serialize(submitted)
       setSaved({ snapshot: submittedSnapshot, updatedAt: brief.updated_at })
       setMessage(serialize(formRef.current) === submittedSnapshot
-        ? 'Project brief saved.'
-        : 'Saved. You have newer unsaved changes.')
+        ? { text: 'Project brief saved.', tone: 'info' }
+        : { text: 'Saved. You have newer unsaved changes.', tone: 'info' })
     } catch {
-      setMessage('Unable to save the project brief. Please try again.')
+      setMessage({ text: 'Unable to save the project brief. Please try again.', tone: 'error' })
     } finally {
       setIsSaving(false)
     }
@@ -159,14 +162,15 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
       const result = await response.json()
       if (!response.ok) throw new Error('Reload failed')
       const brief = result.brief as ProjectBrief | null
+      setSavedBrief(brief)
       const next = initialForm(brief)
       setForm(next)
       setSaved({ snapshot: serialize(next), updatedAt: brief?.updated_at ?? null })
       setLastReviewed(brief?.last_reviewed_at ?? null)
       setConflict(false)
-      setMessage('Latest version loaded.')
+      setMessage({ text: 'Latest version loaded.', tone: 'info' })
     } catch {
-      setMessage('Unable to load the latest brief. Please try again.')
+      setMessage({ text: 'Unable to load the latest brief. Please try again.', tone: 'error' })
     } finally {
       setIsSaving(false)
     }
@@ -188,8 +192,8 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
 
   // Read-first: a brief with content opens as readable sections; the form is
   // an explicit Edit mode.
-  if (!editing && initialBrief) {
-    const brief = initialBrief
+  if (!editing && savedBrief) {
+    const brief = savedBrief
     const filled = NARRATIVE_FIELDS.filter(({ key }) => brief[key]?.trim())
     return (
       <section aria-labelledby="brief-heading" className="corner-ticks relative border border-line bg-surface">
@@ -236,8 +240,8 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
         </div>
         <div className="flex items-center gap-4">
           {reviewedBadge}
-          {hasContent(initialBrief) && (
-            <Button variant="ghost" onClick={() => { setForm(initialForm(initialBrief)); setEditing(false); setMessage(''); setConflict(false) }} className="eyebrow">
+          {hasContent(savedBrief) && (
+            <Button variant="ghost" onClick={() => { setForm(initialForm(savedBrief)); setEditing(false); setMessage(null); setConflict(false) }} className="eyebrow">
               Done editing
             </Button>
           )}
@@ -375,16 +379,18 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
               </span>
             </label>
 
-            <div className="flex items-center justify-end gap-4">
-              <span className="font-mono text-[10px] text-dim">{totalLength.toLocaleString()}/{BRIEF_TOTAL_LIMIT.toLocaleString()}</span>
-              {message && <span role="status" className="font-mono text-[11px] text-dim">{message}</span>}
-              {conflict && (
-                <Button type="button" variant="outline" onClick={reloadLatest} className="eyebrow">Reload latest</Button>
-              )}
-              <Button type="submit" disabled={isSaving || !dirty} className="eyebrow">
-                <Save className="h-3.5 w-3.5" />
-                {isSaving ? 'Saving' : 'Save brief'}
-              </Button>
+            <div className="flex flex-col gap-2 sm:items-end">
+              {message && <StatusMessage tone={message.tone}>{message.text}</StatusMessage>}
+              <div className="flex items-center justify-end gap-4">
+                <span className="font-mono text-[10px] text-dim">{totalLength.toLocaleString()}/{BRIEF_TOTAL_LIMIT.toLocaleString()}</span>
+                {conflict && (
+                  <Button type="button" variant="outline" onClick={reloadLatest} className="eyebrow">Reload latest</Button>
+                )}
+                <Button type="submit" disabled={isSaving || !dirty} className="eyebrow">
+                  <Save className="h-3.5 w-3.5" />
+                  {isSaving ? 'Saving' : 'Save brief'}
+                </Button>
+              </div>
             </div>
           </div>
         </fieldset>

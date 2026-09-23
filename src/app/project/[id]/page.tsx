@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import ProjectDetailClient from '@/components/ProjectDetailClient'
 import { Logo } from '@/components/icons/Logo'
+import { UUID_PATTERN } from '@/lib/api-validation'
 
 const PROJECT_COLUMNS = 'id, user_id, github_repo_id, name, full_name, description, html_url, language, homepage, stargazers_count, pushed_at, github_created_at, is_private, ai_opt_in, github_fork, github_owner_login, github_owner_type, technologies, has_code_map, github_deleted_at, created_at, updated_at'
 
@@ -35,6 +36,10 @@ export default async function ProjectPage({
 
   if (!user) {
     redirect('/login')
+  }
+
+  if (!UUID_PATTERN.test(id)) {
+    notFound()
   }
 
   // Distinguish a failed read from a confirmed absence: dependency failures

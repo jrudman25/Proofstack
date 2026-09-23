@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { ApiError } from '@/lib/api-validation'
+import { GITHUB_USERNAME_PATTERN } from '@/lib/profile-slug-patterns'
 import { readBodyBytes } from '@/lib/read-body'
 import { createRedis, redisKey, type UserContext } from '@/lib/redis'
 
@@ -65,14 +66,13 @@ function parseRepos(value: unknown, limit: number): GithubRepo[] {
   return value.map((repo: unknown) => {
     if (!repo || typeof repo !== 'object' || Array.isArray(repo)) unavailable()
     const r = repo as Record<string, unknown>
-    // Cache entries hold the parsed shape (is_private/github_created_at);
-    // live API payloads use GitHub's raw names (private/created_at).
+    // Live API payloads use GitHub's raw names (private/created_at); the
+    // parsed storage names are also accepted for defensive tolerance.
     const isPrivate = r.private ?? r.is_private
     const createdAt = r.created_at ?? r.github_created_at
-    // Repository relationship: live payloads carry fork and owner.{login,type};
-    // cached entries hold the parsed storage names. Owner login is always
-    // derivable from full_name; an unrecognized owner type is dropped to null
-    // rather than aborting the import.
+    // Repository relationship: live payloads carry fork and owner.{login,type}.
+    // Owner login is always derivable from full_name; an unrecognized owner
+    // type is dropped to null rather than aborting the import.
     const fork = r.fork ?? r.github_fork ?? false
     const owner = (r.owner && typeof r.owner === 'object' && !Array.isArray(r.owner) ? r.owner : {}) as Record<string, unknown>
     const ownerLogin = owner.login ?? r.github_owner_login ?? (typeof r.full_name === 'string' ? r.full_name.split('/')[0] : undefined)
@@ -104,13 +104,6 @@ function parseRepos(value: unknown, limit: number): GithubRepo[] {
 export async function fetchGithubRepos(identity: GithubIdentity): Promise<GithubRepo[]> {
   try {
     if (!identity.accessToken?.trim()) unavailable()
-    const redis = createRedis()
-    const key = cacheKey(identity, 'github-repos')
-    // Try to get from cache first
-    const cached = await redis.get(key)
-    if (cached !== null) return parseRepos(cached, MAX_GITHUB_PAGES * 100)
-
-    // Fetch from GitHub
     const repos = new Map<number, GithubRepo>()
     const traversalSignal = AbortSignal.timeout(60_000)
     for (let page = 1; page <= MAX_GITHUB_PAGES; page++) {
@@ -123,12 +116,7 @@ export async function fetchGithubRepos(identity: GithubIdentity): Promise<Github
       const bytes = await readBodyBytes(res, 2 * 1024 * 1024)
       const batch = parseRepos(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), 100)
       for (const repo of batch) repos.set(repo.id, repo)
-      if (batch.length < 100) {
-        const data = [...repos.values()]
-        // Cache for 1 hour to prevent rate limiting
-        await redis.set(key, data, { ex: 3600 })
-        return data
-      }
+      if (batch.length < 100) return [...repos.values()]
     }
     throw new ApiError(503, 'GitHub repository pagination limit reached; sync was not started')
   } catch (error) {
@@ -369,9 +357,7 @@ export async function fetchGithubReadme(owner: string, repo: string, identity: G
   }
 }
 
-// GitHub usernames: up to 39 characters, alphanumeric or single hyphens, never
-// leading or trailing hyphens. Case-insensitive; callers normalize to lower.
-export const GITHUB_USERNAME_PATTERN = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/
+export { GITHUB_USERNAME_PATTERN }
 
 export type GithubPublicUser = {
   login: string

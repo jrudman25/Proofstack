@@ -17,12 +17,16 @@ const repository = {
   owner: { login: 'owner', type: 'User' },
 }
 
+const io = vi.hoisted(() => ({ redisSet: vi.fn(), redisDel: vi.fn() }))
+vi.mock('@upstash/redis', () => ({ Redis: class { set = io.redisSet; del = io.redisDel } }))
+
 function delivery(body = JSON.stringify({ repository }), headers: Record<string, string> = {}) {
   return new Request('http://localhost/api/webhooks/github', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'x-github-event': 'push',
+      'x-github-delivery': 'delivery-1',
       'x-hub-signature-256': `sha256=${crypto.createHmac('sha256', secret).update(body).digest('hex')}`,
       ...headers,
     },
@@ -36,6 +40,10 @@ beforeEach(() => {
   vi.stubEnv('GITHUB_WEBHOOK_SECRET', secret)
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://database.example.com')
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-role-test-key')
+  vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.example.com')
+  vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'redis-token')
+  io.redisSet.mockReset().mockResolvedValue('OK')
+  io.redisDel.mockReset().mockResolvedValue(1)
   network = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
   vi.stubGlobal('fetch', network)
 })
@@ -149,11 +157,13 @@ describe('GitHub webhook database behavior', () => {
       expect(request.headers.get('apikey')).toBe('service-role-test-key')
       expect(request.headers.get('cookie')).toBeNull()
       const changes = await request.json()
+      // A routine push or edit must not downgrade visibility: is_private only
+      // leaves the payload through privatized/publicized events.
       expect(changes).toEqual({
         name: repository.name, full_name: repository.full_name,
         description: null, html_url: repository.html_url, language: repository.language,
         stargazers_count: 7, pushed_at: repository.pushed_at,
-        is_private: false, github_fork: false,
+        github_fork: false,
         github_owner_login: 'owner', github_owner_type: 'User',
         github_deleted_at: null,
         updated_at: expect.any(String),
@@ -266,5 +276,101 @@ describe('GitHub webhook database behavior', () => {
     const response = await POST(delivery())
     expect(response.status).toBe(500)
     expect(await response.json()).toEqual({ error: 'Webhook processing failed' })
+  })
+})
+
+describe('GitHub webhook delivery deduplication', () => {
+  it('acknowledges a repeated delivery id without a database write', async () => {
+    io.redisSet.mockResolvedValue(null)
+    const response = await POST(delivery())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ received: true, duplicate: true })
+    expect(network).not.toHaveBeenCalled()
+  })
+
+  it('claims each delivery id once with a bounded ttl', async () => {
+    expect((await POST(delivery())).status).toBe(200)
+    expect(io.redisSet).toHaveBeenCalledOnce()
+    const [key, value, options] = io.redisSet.mock.calls[0]
+    expect(String(key)).toContain('github-webhook-delivery')
+    expect(String(key)).toContain('delivery-1')
+    expect(value).toBe(1)
+    expect(options).toEqual({ nx: true, ex: 259200 })
+  })
+
+  it.each([undefined, 'has spaces', 'bad/id', 'x'.repeat(101)])('rejects a missing or malformed delivery id %s', async value => {
+    const request = delivery()
+    if (value === undefined) request.headers.delete('x-github-delivery')
+    else request.headers.set('x-github-delivery', value)
+    const response = await POST(request)
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'Invalid payload' })
+    expect(io.redisSet).not.toHaveBeenCalled()
+    expect(network).not.toHaveBeenCalled()
+  })
+
+  it('fails closed without a database write when Redis is unavailable', async () => {
+    io.redisSet.mockRejectedValue(new Error('secret-redis'))
+    const response = await POST(delivery())
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({ error: 'Webhook processing unavailable' })
+    expect(network).not.toHaveBeenCalled()
+  })
+
+  it('releases the delivery claim when the database write fails', async () => {
+    network.mockResolvedValue(new Response(JSON.stringify({ message: 'private database details' }), {
+      status: 403, headers: { 'content-type': 'application/json' },
+    }))
+    const response = await POST(delivery())
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: 'Webhook processing failed' })
+    expect(io.redisDel).toHaveBeenCalledOnce()
+    expect(String(io.redisDel.mock.calls[0][0])).toContain('delivery-1')
+  })
+})
+
+describe('GitHub webhook visibility guard', () => {
+  const captured = () => {
+    const writes: Record<string, unknown>[] = []
+    network.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+      writes.push(await new Request(input, init).json())
+      return new Response(null, { status: 204 })
+    })
+    return writes
+  }
+
+  it('omits is_private from a stale push reporting public', async () => {
+    const writes = captured()
+    const response = await POST(delivery(JSON.stringify({ repository }), { 'x-github-event': 'push' }))
+    expect(response.status).toBe(200)
+    expect(writes[0]).not.toHaveProperty('is_private')
+  })
+
+  it('omits is_private from a non-visibility repository action', async () => {
+    const writes = captured()
+    const response = await POST(delivery(JSON.stringify({ action: 'edited', repository }), { 'x-github-event': 'repository' }))
+    expect(response.status).toBe(200)
+    expect(writes[0]).not.toHaveProperty('is_private')
+  })
+
+  it('marks the project public on an explicit publicized event', async () => {
+    const writes = captured()
+    const response = await POST(delivery(JSON.stringify({ action: 'publicized', repository }), { 'x-github-event': 'repository' }))
+    expect(response.status).toBe(200)
+    expect(writes[0]?.is_private).toBe(false)
+  })
+
+  it('marks the project private on an explicit privatized event', async () => {
+    const writes = captured()
+    const response = await POST(delivery(JSON.stringify({ action: 'privatized', repository: { ...repository, private: true } }), { 'x-github-event': 'repository' }))
+    expect(response.status).toBe(200)
+    expect(writes[0]?.is_private).toBe(true)
+  })
+
+  it('still propagates private from a push payload reporting private', async () => {
+    const writes = captured()
+    const response = await POST(delivery(JSON.stringify({ repository: { ...repository, private: true } }), { 'x-github-event': 'push' }))
+    expect(response.status).toBe(200)
+    expect(writes[0]?.is_private).toBe(true)
   })
 })

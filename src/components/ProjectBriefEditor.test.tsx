@@ -74,6 +74,44 @@ it('sends the loaded updated_at as the base version for an existing brief', asyn
   expect(JSON.parse(fetch.mock.calls[0][1].body).baseUpdatedAt).toBe('2026-09-12T00:00:00.000Z')
 })
 
+it('shows the newly saved brief in read mode after Done editing', async () => {
+  const onDirtyChange = vi.fn()
+  const updatedBrief = { ...savedBrief, purpose: 'Updated purpose', updated_at: '2026-09-13T00:00:00.000Z' }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ brief: updatedBrief }) }))
+  render(<ProjectBriefEditor projectId={projectId} initialBrief={savedBrief} onDirtyChange={onDirtyChange} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Edit brief' }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Purpose' }), { target: { value: 'Updated purpose' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Edit project brief' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('Project brief saved.')
+  fireEvent.click(screen.getByRole('button', { name: 'Done editing' }))
+  expect(screen.queryByRole('form', { name: 'Edit project brief' })).not.toBeInTheDocument()
+  expect(screen.getByText('Updated purpose')).toBeInTheDocument()
+  expect(screen.queryByText('Prepare developers for interviews')).not.toBeInTheDocument()
+  expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+})
+
+it('offers Done editing after a first save and shows the saved brief in read mode', async () => {
+  const newBrief: ProjectBrief = { ...savedBrief, purpose: 'Brand new purpose', visibility: 'private', lifecycle_status: null, owner_verified_at: null, last_reviewed_at: null }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ brief: newBrief }) }))
+  render(<ProjectBriefEditor projectId={projectId} />)
+  expect(screen.queryByRole('button', { name: 'Done editing' })).not.toBeInTheDocument()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Purpose' }), { target: { value: 'Brand new purpose' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Edit project brief' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('Project brief saved.')
+  fireEvent.click(screen.getByRole('button', { name: 'Done editing' }))
+  expect(screen.queryByRole('form', { name: 'Edit project brief' })).not.toBeInTheDocument()
+  expect(screen.getByText('Brand new purpose')).toBeInTheDocument()
+})
+
+it('discards unsaved edits when Done editing returns to the last saved brief', async () => {
+  render(<ProjectBriefEditor projectId={projectId} initialBrief={savedBrief} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Edit brief' }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Purpose' }), { target: { value: 'Unsaved edit' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Done editing' }))
+  expect(screen.getByText('Prepare developers for interviews')).toBeInTheDocument()
+  expect(screen.queryByText('Unsaved edit')).not.toBeInTheDocument()
+})
+
 it('offers to reload the latest version after a conflict', async () => {
   vi.stubGlobal('fetch', vi.fn()
     .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: 'stale' }) })
