@@ -20,6 +20,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isOwner(value: unknown): value is { login: string; type: string } {
+  return isObject(value) && typeof value.login === 'string' && /^[\w-]+$/.test(value.login)
+}
+
 function isRepository(value: unknown): value is {
   id: number
   name: string
@@ -29,6 +33,9 @@ function isRepository(value: unknown): value is {
   language: string | null
   stargazers_count: number
   pushed_at: string | null
+  private: boolean
+  fork: boolean
+  owner: { login: string; type: string }
 } {
   if (!isObject(value)) return false
   return Number.isSafeInteger(value.id) && (value.id as number) > 0
@@ -42,6 +49,9 @@ function isRepository(value: unknown): value is {
     && (value.pushed_at === null || (typeof value.pushed_at === 'string'
       && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value.pushed_at)
       && Number.isFinite(Date.parse(value.pushed_at))))
+    && typeof value.private === 'boolean'
+    && typeof value.fork === 'boolean'
+    && isOwner(value.owner)
 }
 
 export async function POST(request: Request) {
@@ -94,6 +104,10 @@ export async function POST(request: Request) {
 
     // We need to find if this repo exists in our DB, and who it belongs to
     // Update existing project
+    // Visibility and ownership fields matter as much as the metadata: a
+    // repository made private on GitHub must drop off public profiles and AI
+    // payloads immediately (the consent trigger removes its embeddings), not
+    // wait for the owner's next manual sync.
     const { error } = await supabase.from('projects').update({
       name: repo.name,
       full_name: repo.full_name,
@@ -102,6 +116,10 @@ export async function POST(request: Request) {
       language: repo.language,
       stargazers_count: repo.stargazers_count,
       pushed_at: repo.pushed_at,
+      is_private: repo.private,
+      github_fork: repo.fork,
+      github_owner_login: repo.owner.login,
+      github_owner_type: repo.owner.type === 'User' || repo.owner.type === 'Organization' ? repo.owner.type : null,
       updated_at: new Date().toISOString()
     }).eq('github_repo_id', repo.id)
     if (error) throw error

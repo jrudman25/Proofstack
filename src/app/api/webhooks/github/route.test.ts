@@ -12,6 +12,9 @@ const repository = {
   language: 'TypeScript',
   stargazers_count: 7,
   pushed_at: '2026-05-21T12:00:00Z',
+  private: false,
+  fork: false,
+  owner: { login: 'owner', type: 'User' },
 }
 
 function delivery(body = JSON.stringify({ repository }), headers: Record<string, string> = {}) {
@@ -114,6 +117,8 @@ describe('GitHub webhook validation', () => {
     { html_url: 'javascript:alert(1)' }, { language: [] },
     { stargazers_count: -1 }, { stargazers_count: 1.5 },
     { pushed_at: 'yesterday' }, { pushed_at: 123 }, { language: undefined },
+    { private: 'yes' }, { private: undefined }, { fork: 1 }, { fork: undefined },
+    { owner: null }, { owner: { login: 'not a login' } }, { owner: { type: 'User' } },
   ])('rejects invalid repository fields %j', async fields => {
     expect((await POST(delivery(JSON.stringify({ repository: { ...repository, ...fields } })))).status).toBe(400)
     expect(network).not.toHaveBeenCalled()
@@ -147,7 +152,10 @@ describe('GitHub webhook database behavior', () => {
       expect(changes).toEqual({
         name: repository.name, full_name: repository.full_name,
         description: null, html_url: repository.html_url, language: repository.language,
-        stargazers_count: 7, pushed_at: repository.pushed_at, updated_at: expect.any(String),
+        stargazers_count: 7, pushed_at: repository.pushed_at,
+        is_private: false, github_fork: false,
+        github_owner_login: 'owner', github_owner_type: 'User',
+        updated_at: expect.any(String),
       })
       for (const row of rows) {
         if (url.searchParams.get('github_repo_id') === `eq.${row.github_repo_id}`) Object.assign(row, changes)
@@ -163,6 +171,19 @@ describe('GitHub webhook database behavior', () => {
     expect(response.status).toBe(200)
     expect(rows.map(row => row.name)).toEqual(['updated', 'updated', 'unrelated'])
     expect(rows.map(row => row.user_id)).toEqual(['alice', 'bob', 'alice'])
+  })
+
+  it('propagates privatized repositories so they leave public and AI surfaces', async () => {
+    let changes: Record<string, unknown> | undefined
+    network.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+      changes = await new Request(input, init).json()
+      return new Response(null, { status: 204 })
+    })
+    const response = await POST(delivery(JSON.stringify({
+      repository: { ...repository, private: true },
+    }), { 'x-github-event': 'repository' }))
+    expect(response.status).toBe(200)
+    expect(changes?.is_private).toBe(true)
   })
 
   it('acknowledges an untracked repository with no returned rows', async () => {
