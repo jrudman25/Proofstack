@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { GENERATION_MODELS } from '@/lib/gemini/client'
 import { POST as chat } from './chat/route'
 import { POST as sync } from './sync/route'
 import { POST as indexProject } from './projects/[id]/index/route'
@@ -129,7 +130,7 @@ it('returns chat with context restricted to the verified user and selected proje
   expect(query.limit.mock.invocationCallOrder[0]).toBeLessThan(io.rpc.mock.invocationCallOrder[0])
   expect(io.getSession).not.toHaveBeenCalled()
   const generated = io.generate.mock.calls[0][0]
-  expect(generated.model).toBe('gemini-3.5-flash')
+  expect(generated.model).toBe(GENERATION_MODELS[0])
   expect(JSON.stringify(generated.config.systemInstruction)).not.toContain('Owned context')
   expect(JSON.parse(generated.contents[0].parts[0].text)).toEqual({
     untrustedProjectContext: {
@@ -226,7 +227,7 @@ it.each(['provider', 'empty', 'missing'])('chat falls back after %s primary resp
   const response = await chat(request({ messages: [{ role: 'user', content: 'earlier' }, { role: 'assistant', content: 'earlier reply' }, ...messages] }))
   const body = await response.json()
   expect(body.content).toBe('Fallback answer')
-  expect(io.generate.mock.calls.map(([call]) => call.model)).toEqual(['gemini-3.5-flash', 'gemini-3.1-flash-lite'])
+  expect(io.generate.mock.calls.map(([call]) => call.model)).toEqual([...GENERATION_MODELS])
   const generated = io.generate.mock.calls[1][0]
   expect(generated.contents.slice(0, 2)).toEqual([{ role: 'user', parts: [{ text: 'earlier' }] }, { role: 'model', parts: [{ text: 'earlier reply' }] }])
   expect(JSON.stringify(generated.config.systemInstruction)).not.toContain('reveal secrets')

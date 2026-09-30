@@ -373,9 +373,9 @@ export default function ProjectBriefEditor({ projectId, initialBrief, onDirtyCha
               <span>
                 <span className="flex items-center gap-1.5 font-medium">
                   {form.ownerVerified && <Check className="h-3.5 w-3.5 text-brand" />}
-                  Mark this content as owner reviewed
+                  I have reviewed this content and am comfortable presenting it as my own
                 </span>
-                <span className="mt-0.5 block text-xs leading-relaxed text-dim">Only verify statements you are comfortable presenting as your own.</span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-dim">Marks the brief as owner reviewed on your profile and in anything you publish.</span>
               </span>
             </label>
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { GENERATION_MODELS } from '@/lib/gemini/client'
 import { POST } from './route'
 
 const io = vi.hoisted(() => ({ getUser: vi.fn(), from: vi.fn(), eval: vi.fn(), generate: vi.fn(), projectLimit: vi.fn(), briefIn: vi.fn(), embedIn: vi.fn(), briefingUpsert: vi.fn() }))
@@ -97,8 +98,8 @@ it('falls back to the next model when the first response is unusable', async () 
   const response = await POST()
   expect(response.status).toBe(200)
   expect(io.generate).toHaveBeenCalledTimes(2)
-  expect(io.generate.mock.calls[0][0].model).toBe('gemini-3.5-flash')
-  expect(io.generate.mock.calls[1][0].model).toBe('gemini-3.1-flash-lite')
+  expect(io.generate.mock.calls[0][0].model).toBe(GENERATION_MODELS[0])
+  expect(io.generate.mock.calls[1][0].model).toBe(GENERATION_MODELS[1])
   const { briefing } = await response.json()
   expect(briefing.summary).toBe('A TypeScript portfolio.')
 })

@@ -45,7 +45,7 @@ it('saves owner context, sends the base version, and marks reviewed content', as
   fireEvent.change(screen.getByRole('combobox', { name: 'Lifecycle status' }), { target: { value: 'active' } })
   fireEvent.change(screen.getByRole('combobox', { name: 'Portfolio visibility' }), { target: { value: 'public' } })
   fireEvent.change(screen.getByRole('textbox', { name: 'Purpose' }), { target: { value: 'Prepare developers for interviews' } })
-  fireEvent.click(screen.getByRole('checkbox', { name: /mark this content as owner reviewed/i }))
+  fireEvent.click(screen.getByRole('checkbox', { name: /reviewed this content/i }))
   fireEvent.submit(screen.getByRole('form', { name: 'Edit project brief' }))
 
   await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
