@@ -191,6 +191,33 @@ const DEVICON_BY_TECHNOLOGY: Record<string, string> = {
   ember: 'devicon-ember-plain',
   backbonejs: 'devicon-backbonejs-plain',
   redis: 'devicon-redis-plain',
+  // Technologies reachable through repository topics and framework manifests
+  deno: 'devicon-denojs-original',
+  flutter: 'devicon-flutter-plain',
+  solid: 'devicon-solidjs-plain',
+  solidjs: 'devicon-solidjs-plain',
+  qwik: 'devicon-qwik-plain',
+  flask: 'devicon-flask-original',
+  fastapi: 'devicon-fastapi-plain',
+  spring: 'devicon-spring-original',
+  springboot: 'devicon-spring-original',
+  sqlite: 'devicon-sqlite-plain',
+  mariadb: 'devicon-mariadb-original',
+  elasticsearch: 'devicon-elasticsearch-plain',
+  rabbitmq: 'devicon-rabbitmq-original',
+  kubernetes: 'devicon-kubernetes-plain',
+  prometheus: 'devicon-prometheus-original',
+  grafana: 'devicon-grafana-plain',
+  nginx: 'devicon-nginx-original',
+  railway: 'devicon-railway-original',
+  googlecloud: 'devicon-googlecloud-plain',
+  jekyll: 'devicon-jekyll-plain',
+  hugo: 'devicon-hugo-plain',
+  eleventy: 'devicon-eleventy-plain',
+  unity: 'devicon-unity-plain',
+  unrealengine: 'devicon-unrealengine-original',
+  godot: 'devicon-godot-plain',
+  fortran: 'devicon-fortran-original',
 }
 const deviconFor = (tech: string) => DEVICON_BY_TECHNOLOGY[normalizeTechnology(tech)] ?? null
 
@@ -299,7 +326,10 @@ export default function Dashboard({
           : data.enrichmentFailures > 0
             ? ` ${data.enrichmentFailures} ${data.enrichmentFailures === 1 ? 'repository' : 'repositories'} synced without manifest evidence.`
             : ''
-        setSyncMessage({ text: `Synced ${data.syncedCount} projects.${incomplete}`, tone: 'info' })
+        const readme = data.readmeIndexedCount > 0
+          ? ` Indexed ${data.readmeIndexedCount} ${data.readmeIndexedCount === 1 ? 'README' : 'READMEs'} for chat.`
+          : ''
+        setSyncMessage({ text: `Synced ${data.syncedCount} projects.${incomplete}${readme}`, tone: 'info' })
         router.refresh()
       } else {
         setSyncMessage({ text: clientErrorMessage(res, data, 'Unable to sync projects. Please try again.'), tone: 'error' })
@@ -748,7 +778,7 @@ export default function Dashboard({
                   })}
                 </span>
                 <span className="whitespace-nowrap font-mono text-[10px] text-dim">
-                  {isoDate(project.pushed_at || project.updated_at) ?? '----.--.--'}
+                  Updated {isoDate(project.pushed_at || project.updated_at) ?? '----.--.--'}
                 </span>
               </footer>
             </article>

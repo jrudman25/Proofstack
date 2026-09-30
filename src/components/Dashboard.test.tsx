@@ -137,6 +137,18 @@ it('renders bundled brand marks for technologies without devicon glyphs', () => 
   }
 })
 
+it('renders brand marks and generic glyphs for detected tools like Fly.io, TanStack Router, Make, and Assembly', () => {
+  const { container } = render(<Dashboard initialProjects={[{ ...project, language: 'Assembly', technologies: ['Fly.io', 'TanStack Router', 'Make'] }]} />)
+  for (const tech of ['Fly.io', 'TanStack Router', 'Make', 'Assembly']) {
+    expect(container.querySelector(`svg[title="${tech}"]`)).not.toBeNull()
+  }
+})
+
+it('labels the project card date so it reads as the last update', () => {
+  render(<Dashboard initialProjects={[project]} />)
+  expect(screen.getByText('Updated 2026-03-04')).toBeInTheDocument()
+})
+
 it('requests the repo scope through the same allow-listed callback path as sign-in', async () => {
   render(<Dashboard initialProjects={[project]} privateReposConnected={false} />)
   fireEvent.click(screen.getByRole('button', { name: /Include private repositories/ }))
