@@ -5,6 +5,10 @@ import { enforceRateLimit } from '@/lib/rate-limit'
 import { fetchGithubDirectoryEntries, fetchGithubPackageDependencies, fetchGithubRepoLanguages, fetchGithubRepos, fetchGithubRootEntries, fetchGithubTokenScopes, type GithubRepo } from '@/lib/github/api'
 import { mergeTechnologies, normalizeTechnology, technologiesFromPackageDependencies } from '@/lib/package-technologies'
 import { technologiesFromManifestFiles } from '@/lib/manifest-technologies'
+import { technologiesFromTopics } from '@/lib/topic-technologies'
+import { indexProjectReadme } from '@/lib/index-readme'
+import { aiEligible, evidenceStatus } from '@/lib/project-evidence'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 const MANIFEST_BATCH_SIZE = 10
 const WORKSPACE_ROOTS = ['apps', 'packages', 'services'] as const
@@ -13,6 +17,12 @@ const MAX_WORKSPACE_MANIFESTS = 12
 // fetchGithubRepos; enrichment gets a separate bound so a slow provider or a
 // large cold-cache portfolio cannot stall the whole import.
 const ENRICHMENT_BUDGET_MS = 45_000
+// README indexing runs after the catalog writes, bounded in count and time:
+// each index costs a GitHub fetch plus a Gemini embedding, so a large or
+// cold portfolio must not stall the sync response. Remaining stale or
+// missing READMEs are picked up by the next sync or the per-project index.
+const README_INDEX_LIMIT = 20
+const README_INDEX_BUDGET_MS = 20_000
 
 type ExistingProject = { github_repo_id: number; technologies: string[] | null; is_private: boolean }
 type IndexedRepo = GithubRepo & { technologies: string[] }
@@ -52,11 +62,17 @@ async function enrichRepository(repo: GithubRepo, existing: Map<number, string[]
   const workspace = await fetchWorkspaceDependencies(owner, repo.name, files, identity)
   const dependencies = mergeTechnologies(rootDependencies, workspace.dependencies)
   const primary = repo.language && normalizeTechnology(repo.language)
+  // A completed enrichment observed the repository, so its detection is
+  // authoritative: removed dependencies and topics stop surfacing. Stored
+  // labels are kept only when nothing could be fetched at all (the caller
+  // also preserves them when enrichment throws or the budget expires).
+  const observed = files !== null || languages !== null
   return {
     repo: {
       ...repo,
       technologies: mergeTechnologies(
-        existing.get(repo.id),
+        observed ? null : existing.get(repo.id),
+        technologiesFromTopics(repo.topics),
         dependencies.length ? technologiesFromPackageDependencies(dependencies) : null,
         files && technologiesFromManifestFiles(files),
         languages?.filter(language => normalizeTechnology(language) !== primary),
@@ -96,6 +112,49 @@ async function addManifestTechnologies(repos: GithubRepo[], existing: Map<number
     }
   }
   return { repos: indexed, packageJsonCount, enrichmentFailures, enrichmentComplete }
+}
+
+// Embeds missing or stale README evidence for AI-eligible projects: public
+// repositories always qualify; private ones require per-project ai_opt_in.
+// Failures (a held lock, GitHub, or the provider) leave the evidence marked
+// missing or stale rather than failing the completed catalog import.
+async function indexStaleReadmes(supabase: SupabaseClient, userId: string, accessToken: string) {
+  const { data: projects, error } = await supabase
+    .from('projects')
+    .select('id, full_name, pushed_at, is_private, ai_opt_in, github_deleted_at')
+    .eq('user_id', userId)
+  if (error) {
+    console.warn('Unable to list projects for README indexing')
+    return 0
+  }
+  const candidates = (projects || [])
+    .filter(project => !project.github_deleted_at && aiEligible(project))
+    .sort((a, b) => (b.pushed_at ? Date.parse(b.pushed_at) : 0) - (a.pushed_at ? Date.parse(a.pushed_at) : 0))
+  if (!candidates.length) return 0
+  const { data: embeddings, error: embeddingsError } = await supabase
+    .from('project_embeddings')
+    .select('project_id, source, metadata')
+    .in('project_id', candidates.map(project => project.id))
+  if (embeddingsError) {
+    console.warn('Unable to read README index state')
+    return 0
+  }
+  const readmeIndexedAt = new Map(((embeddings || []) as { project_id: string; source: string; metadata: unknown }[])
+    .filter(row => row.source === 'readme')
+    .map(row => [row.project_id, (row.metadata as { pushed_at?: string | null } | null)?.pushed_at]))
+
+  const deadline = Date.now() + README_INDEX_BUDGET_MS
+  let indexedCount = 0
+  for (const project of candidates) {
+    if (indexedCount >= README_INDEX_LIMIT || Date.now() > deadline) break
+    if (evidenceStatus(readmeIndexedAt.get(project.id), project.pushed_at) === 'indexed') continue
+    try {
+      if (await indexProjectReadme({ userId, supabase, accessToken }, project)) indexedCount++
+    } catch {
+      // Skip this repository; its evidence status stays missing or stale.
+    }
+  }
+  return indexedCount
 }
 
 export async function POST(request: Request) {
@@ -210,12 +269,15 @@ export async function POST(request: Request) {
     const { error: syncMarkError } = await supabase.from('profiles').update(profileUpdate).eq('id', userId)
     if (syncMarkError) console.warn('Unable to record completed catalog sync')
 
+    const readmeIndexedCount = await indexStaleReadmes(supabase, userId, providerToken)
+
     return NextResponse.json({
       message: 'Sync complete',
       syncedCount,
       packageJsonCount,
       enrichmentFailures: indexed.enrichmentFailures,
       enrichmentComplete: indexed.enrichmentComplete,
+      readmeIndexedCount,
     })
 
   } catch (error) {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { Project, ProjectBrief } from '@/types'
 import { ArrowLeft, Star, Lock, FileText } from 'lucide-react'
 import { GithubIcon } from '@/components/icons/GithubIcon'
@@ -42,34 +42,6 @@ export default function ProjectDetailClient({
     }
   }
 
-  const handleConsent = async (next: boolean) => {
-    setIsConsentSaving(true)
-    setConsentMessage(null)
-    try {
-      const res = await fetch(`/api/projects/${project.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aiOptIn: next }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setConsentMessage({ text: clientErrorMessage(res, data, 'Unable to update AI consent. Please try again.'), tone: 'error' })
-        return
-      }
-      setAiOptIn(next)
-      setConsentMessage({
-        text: next
-          ? 'AI processing enabled for this repository.'
-          : 'AI processing disabled. Embedded README evidence was removed.',
-        tone: 'info',
-      })
-    } catch {
-      setConsentMessage({ text: 'Unable to update AI consent. Please try again.', tone: 'error' })
-    } finally {
-      setIsConsentSaving(false)
-    }
-  }
-
   const handleIndex = async () => {
     setIndexStatus('working')
     setIndexMessage(null)
@@ -94,6 +66,52 @@ export default function ProjectDetailClient({
       setIndexMessage({ text: 'Unable to index the README. Please try again.', tone: 'error' })
     }
   }
+
+  const handleConsent = async (next: boolean) => {
+    setIsConsentSaving(true)
+    setConsentMessage(null)
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aiOptIn: next }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setConsentMessage({ text: clientErrorMessage(res, data, 'Unable to update AI consent. Please try again.'), tone: 'error' })
+        return
+      }
+      setAiOptIn(next)
+      setConsentMessage({
+        text: next
+          ? 'AI processing enabled for this repository.'
+          : 'AI processing disabled. Embedded README evidence was removed.',
+        tone: 'info',
+      })
+      // Consent unlocks indexing for private repositories; index immediately
+      // when the evidence is missing or stale so the owner does not have to.
+      if (next && (indexStatus !== 'done' || indexStale)) void handleIndex()
+    } catch {
+      setConsentMessage({ text: 'Unable to update AI consent. Please try again.', tone: 'error' })
+    } finally {
+      setIsConsentSaving(false)
+    }
+  }
+
+  // READMEs index themselves: opening a project whose evidence is missing or
+  // stale kicks off indexing without a click. Private repositories wait for
+  // explicit AI consent, which is wired into handleConsent above.
+  const autoIndexed = useRef(false)
+  const autoIndexReadme = useEffectEvent(() => {
+    if (aiEnabled && (!readmeIndexExists || readmeIndexedPushedAt !== project.pushed_at)) {
+      void handleIndex()
+    }
+  })
+  useEffect(() => {
+    if (autoIndexed.current) return
+    autoIndexed.current = true
+    queueMicrotask(autoIndexReadme)
+  }, [])
 
   const evidenceSummary = (
     indexStatus === 'done'
