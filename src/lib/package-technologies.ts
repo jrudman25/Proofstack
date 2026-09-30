@@ -67,7 +67,17 @@ function technologyForDependency(dependency: string) {
   if (name.startsWith('@mui/') || name.startsWith('@material-ui/')) return 'Material UI'
   if (name.startsWith('@reduxjs/')) return 'Redux'
   if (name.startsWith('@storybook/')) return 'Storybook'
-  if (name.startsWith('@tanstack/')) return 'TanStack'
+  // TanStack ships many products under one scope; name the product when the
+  // package identifies it so cards read "TanStack Router", not "TanStack".
+  if (name.startsWith('@tanstack/')) {
+    if (name.includes('start')) return 'TanStack Start'
+    if (name.includes('router')) return 'TanStack Router'
+    if (name.includes('query')) return 'TanStack Query'
+    if (name.includes('table')) return 'TanStack Table'
+    if (name.includes('form')) return 'TanStack Form'
+    if (name.includes('virtual')) return 'TanStack Virtual'
+    return 'TanStack'
+  }
   if (name.startsWith('@supabase/')) return 'Supabase'
   if (name.startsWith('@cloudflare/')) return 'Cloudflare'
   if (name.startsWith('@prisma/')) return 'Prisma'

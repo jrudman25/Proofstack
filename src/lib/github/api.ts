@@ -15,6 +15,7 @@ export type GithubRepo = {
   stargazers_count: number; pushed_at: string | null
   is_private: boolean; github_created_at: string | null
   github_fork: boolean; github_owner_login: string; github_owner_type: 'User' | 'Organization' | null
+  topics: string[]
 }
 
 function unavailable(): never { throw new ApiError(503, 'GitHub service temporarily unavailable') }
@@ -93,11 +94,16 @@ function parseRepos(value: unknown, limit: number): GithubRepo[] {
     if (r.homepage) {
       try { if (!['https:', 'http:'].includes(new URL(r.homepage as string).protocol)) unavailable() } catch { unavailable() }
     }
+    // Topics are absent in payloads cached before this field existed.
+    const topics = r.topics === undefined ? [] : r.topics
+    if (!Array.isArray(topics) || topics.length > 50
+      || topics.some(topic => typeof topic !== 'string' || !/^[a-z0-9][a-z0-9-]{0,49}$/.test(topic))) unavailable()
     return { id: r.id, name: r.name, full_name: r.full_name, description: r.description,
       html_url: r.html_url, language: r.language, homepage: r.homepage,
       stargazers_count: r.stargazers_count, pushed_at: r.pushed_at,
       is_private: isPrivate, github_created_at: createdAt,
-      github_fork: fork, github_owner_login: ownerLogin, github_owner_type: ownerType } as GithubRepo
+      github_fork: fork, github_owner_login: ownerLogin, github_owner_type: ownerType,
+      topics } as GithubRepo
   })
 }
 

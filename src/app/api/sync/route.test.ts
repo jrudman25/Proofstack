@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { POST } from './route'
 
-const io = vi.hoisted(() => ({ getUser: vi.fn(), getSession: vi.fn(), from: vi.fn(), eval: vi.fn(), get: vi.fn(), set: vi.fn(), upsert: vi.fn(), update: vi.fn(), updateEq: vi.fn(), updateIn: vi.fn(), single: vi.fn(), storeToken: vi.fn(), getToken: vi.fn() }))
+const io = vi.hoisted(() => ({ getUser: vi.fn(), getSession: vi.fn(), from: vi.fn(), eval: vi.fn(), get: vi.fn(), set: vi.fn(), upsert: vi.fn(), update: vi.fn(), updateEq: vi.fn(), updateIn: vi.fn(), single: vi.fn(), storeToken: vi.fn(), getToken: vi.fn(), embed: vi.fn() }))
 vi.mock('next/headers', () => ({ cookies: async () => ({ getAll: () => [], set: vi.fn() }) }))
 vi.mock('@/lib/github-token-store', () => ({ storeGithubToken: io.storeToken, getStoredGithubToken: io.getToken }))
 vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth: { getUser: io.getUser, getSession: io.getSession }, from: io.from }) }))
 vi.mock('@upstash/redis', () => ({ Redis: class { eval = io.eval; get = io.get; set = io.set } }))
+vi.mock('@google/genai', () => ({ GoogleGenAI: class { models = { embedContent: io.embed } } }))
 const userId = 'user-a'
 const repos = Array.from({ length: 205 }, (_, i) => ({ id: i + 1, name: `repo-${i}`, full_name: `owner/repo-${i}`, description: null,
   html_url: `https://github.com/owner/repo-${i}`, language: null, homepage: null, stargazers_count: 0, pushed_at: null,
@@ -21,7 +22,7 @@ beforeEach(() => {
   io.get.mockResolvedValue(null)
   io.single.mockResolvedValue({ data: { id: userId }, error: null })
   io.upsert.mockResolvedValue({ error: null })
-  io.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, upsert: io.upsert, update: io.update })
+  io.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, upsert: io.upsert, update: io.update, in: vi.fn().mockResolvedValue({ data: [], error: null }) })
   io.updateEq.mockReturnValue({ in: io.updateIn, then: (resolve: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(resolve) })
   io.updateIn.mockResolvedValue({ error: null })
   io.update.mockReturnValue({ eq: io.updateEq })
@@ -51,11 +52,12 @@ it('paginates and upserts bounded batches owned by the verified user', async () 
     expect(options).toEqual({ onConflict: 'user_id,github_repo_id' })
   }
 })
-it('merges package, manifest, and language technologies with existing metadata', async () => {
+it('detects package, manifest, language, and topic technologies as the authoritative stack', async () => {
   const profileQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, update: io.update }
   const projectQuery = {
     select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockResolvedValue({ data: [{ github_repo_id: 1, technologies: ['Custom Tool'], is_private: false }], error: null }),
+    eq: vi.fn().mockResolvedValue({ data: [{ github_repo_id: 1, technologies: ['Removed Tool'], is_private: false }], error: null }),
+    in: vi.fn().mockResolvedValue({ data: [], error: null }),
     upsert: io.upsert,
     update: io.update
   }
@@ -94,17 +96,44 @@ it('merges package, manifest, and language technologies with existing metadata',
     if (parsed.pathname.endsWith('/languages')) return new Response(JSON.stringify({}))
     const page = Number(parsed.searchParams.get('page'))
     const slice = repos.slice((page - 1) * 100, page * 100)
-      .map(repo => repo.name === 'repo-0' ? { ...repo, language: 'TypeScript' } : repo)
+      .map(repo => repo.name === 'repo-0'
+        ? { ...repo, language: 'TypeScript', topics: ['fly-io', 'tanstack-router', 'hacktoberfest'] }
+        : repo)
     return new Response(JSON.stringify(slice))
   })
   const response = await POST(request())
   expect(await response.json()).toMatchObject({ syncedCount: 205, packageJsonCount: 1 })
   // The primary language is carried by `language`, so it is not duplicated
-  // into technologies; secondary languages are appended.
+  // into technologies; secondary languages are appended. A completed
+  // enrichment is authoritative: 'Removed Tool' drops off and unrecognized
+  // topics like 'hacktoberfest' contribute nothing.
   expect(io.upsert.mock.calls[0][0][0]).toMatchObject({
     language: 'TypeScript',
-    technologies: ['Custom Tool', 'Next.js', 'React', 'Fastify', 'Vite', 'Docker', 'CSS'],
+    technologies: ['Fly.io', 'TanStack Router', 'Next.js', 'React', 'Fastify', 'Vite', 'Docker', 'CSS'],
   })
+})
+it('keeps stored technologies only when a repository cannot be inspected at all', async () => {
+  const profileQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, update: io.update }
+  const projectQuery = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockResolvedValue({ data: [{ github_repo_id: 1, technologies: ['Kept'], is_private: false }], error: null }),
+    in: vi.fn().mockResolvedValue({ data: [], error: null }),
+    upsert: io.upsert,
+    update: io.update
+  }
+  io.from.mockImplementation((table: string) => table === 'profiles' ? profileQuery : projectQuery)
+  vi.mocked(fetch).mockImplementation(async input => {
+    const parsed = new URL(String(input))
+    if (parsed.pathname === '/user') return new Response('{}', { headers: { 'x-oauth-scopes': 'public_repo, read:user' } })
+    if (parsed.pathname.includes('/repo-0/')) return new Response('', { status: 404 })
+    if (parsed.pathname.endsWith('/contents')) return new Response(JSON.stringify([]))
+    if (parsed.pathname.endsWith('/languages')) return new Response(JSON.stringify({}))
+    const page = Number(parsed.searchParams.get('page'))
+    return new Response(JSON.stringify(page === 1 ? [repos[0]] : []))
+  })
+  const response = await POST(request())
+  expect(response.status).toBe(200)
+  expect(io.upsert.mock.calls[0][0][0]).toMatchObject({ technologies: ['Kept'] })
 })
 it('caps selected workspace manifests at twelve per repository', async () => {
   vi.mocked(fetch).mockImplementation(async input => {
@@ -205,6 +234,7 @@ function reconciliationFixture(existing: { github_repo_id: number; technologies:
   const projectQuery = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockResolvedValue({ data: existing, error: null }),
+    in: vi.fn().mockResolvedValue({ data: [], error: null }),
     upsert: io.upsert,
     update: io.update,
   }
@@ -272,4 +302,58 @@ it('fails the sync when tombstoning errors after confirmed upserts', async () =>
   expect(response.status).toBe(503)
   expect(await response.json()).toEqual({ error: 'Service temporarily unavailable', syncedCount: 1, packageJsonCount: 0 })
   expect(io.upsert).toHaveBeenCalledTimes(1)
+})
+
+it('indexes missing and stale README evidence for AI-eligible projects', async () => {
+  vi.stubEnv('GEMINI_API_KEY', 'test-key')
+  // Rate-limit evals answer [count, ttl]; lock renew/release evals answer 1.
+  io.eval.mockImplementation(async (script: string) => script.includes("'INCR'") ? [1, 60] : 1)
+  io.set.mockResolvedValue('OK')
+  io.embed.mockResolvedValue({ embeddings: [{ values: Array(768).fill(0.1) }] })
+
+  const pushedAt = '2026-01-02T00:00:00Z'
+  const projectRows = [
+    // p1 has no embedding row: missing evidence.
+    { id: 'p1', github_repo_id: 1, full_name: 'owner/repo-0', pushed_at: pushedAt, is_private: false, ai_opt_in: false, github_deleted_at: null, technologies: [] },
+    // p2 is embedded but predates the latest push: stale evidence.
+    { id: 'p2', github_repo_id: 2, full_name: 'owner/repo-1', pushed_at: pushedAt, is_private: false, ai_opt_in: false, github_deleted_at: null, technologies: [] },
+    // p3 is already indexed at the current push: skipped.
+    { id: 'p3', github_repo_id: 3, full_name: 'owner/repo-2', pushed_at: pushedAt, is_private: false, ai_opt_in: false, github_deleted_at: null, technologies: [] },
+    // p4 lacks per-project AI consent: skipped.
+    { id: 'p4', github_repo_id: 4, full_name: 'owner/secret', pushed_at: pushedAt, is_private: true, ai_opt_in: false, github_deleted_at: null, technologies: [] },
+    // p5 is tombstoned: skipped.
+    { id: 'p5', github_repo_id: 5, full_name: 'owner/gone', pushed_at: pushedAt, is_private: false, ai_opt_in: false, github_deleted_at: '2026-01-01T00:00:00Z', technologies: [] },
+  ]
+  const embedIn = vi.fn().mockResolvedValue({ data: [
+    { project_id: 'p2', source: 'readme', metadata: { source: 'README', pushed_at: '2025-01-01T00:00:00Z' } },
+    { project_id: 'p3', source: 'readme', metadata: { source: 'README', pushed_at: pushedAt } },
+  ], error: null })
+  const profileQuery = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: io.single, update: io.update }
+  const projectQuery = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockResolvedValue({ data: projectRows, error: null }),
+    in: embedIn,
+    upsert: io.upsert,
+    update: io.update,
+  }
+  io.from.mockImplementation((table: string) => table === 'profiles' ? profileQuery : projectQuery)
+  vi.mocked(fetch).mockImplementation(async input => {
+    const parsed = new URL(String(input))
+    if (parsed.pathname === '/user') return new Response('{}', { headers: { 'x-oauth-scopes': 'public_repo, read:user' } })
+    if (parsed.pathname.endsWith('/readme')) return new Response('# readme')
+    if (parsed.pathname.endsWith('/contents')) return new Response(JSON.stringify([]))
+    if (parsed.pathname.endsWith('/languages')) return new Response(JSON.stringify({}))
+    const page = Number(parsed.searchParams.get('page'))
+    return new Response(JSON.stringify(page === 1 ? [repos[0]] : []))
+  })
+
+  const response = await POST(request())
+  expect(response.status).toBe(200)
+  expect(await response.json()).toMatchObject({ syncedCount: 1, readmeIndexedCount: 2 })
+  expect(embedIn).toHaveBeenCalledWith('project_id', ['p1', 'p2', 'p3'])
+  expect(io.embed).toHaveBeenCalledTimes(2)
+  expect(io.upsert).toHaveBeenCalledWith(
+    expect.objectContaining({ project_id: 'p1', source: 'readme', metadata: { source: 'README', pushed_at: pushedAt } }),
+    { onConflict: 'project_id,source' },
+  )
 })

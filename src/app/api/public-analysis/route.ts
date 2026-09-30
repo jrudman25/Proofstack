@@ -56,6 +56,7 @@ Use only the supplied data. Describe the developer in third person. Do not infer
         name: repo.name,
         description: repo.description,
         language: repo.language,
+        topics: repo.topics,
         stars: repo.stargazers_count,
         fork: repo.github_fork,
         pushedAt: repo.pushed_at,

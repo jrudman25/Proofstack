@@ -55,7 +55,15 @@ describe('GitHub helpers', () => {
     expect(fetch).toHaveBeenCalledTimes(4)
     expect(vi.mocked(fetch).mock.calls[3][1]?.headers).not.toHaveProperty('Authorization')
   })
-  it.each([{ id: 1 }, { ...repo(1), stargazers_count: -1 }, { ...repo(1), html_url: 'javascript:secret' }, { ...repo(1), pushed_at: 'invalid' }])('rejects malformed persisted fields', async malformed => {
+  it('parses repository topics and defaults older payloads to none', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response([{ ...repo(9), topics: ['fly-io', 'tanstack-router'] }]))
+    expect(await fetchGithubRepos(identity)).toEqual([
+      expect.objectContaining({ id: 9, topics: ['fly-io', 'tanstack-router'] }),
+    ])
+    vi.mocked(fetch).mockResolvedValueOnce(response([repo(10)]))
+    expect(await fetchGithubRepos(identity)).toEqual([expect.objectContaining({ id: 10, topics: [] })])
+  })
+  it.each([{ id: 1 }, { ...repo(1), stargazers_count: -1 }, { ...repo(1), html_url: 'javascript:secret' }, { ...repo(1), pushed_at: 'invalid' }, { ...repo(1), topics: 'nextjs' }, { ...repo(1), topics: ['bad topic!'] }])('rejects malformed persisted fields', async malformed => {
     vi.mocked(fetch).mockResolvedValue(response([malformed]))
     await expect(fetchGithubRepos(identity)).rejects.toThrow('GitHub service temporarily unavailable')
     expect(io.set).not.toHaveBeenCalled()

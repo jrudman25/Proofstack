@@ -18,4 +18,10 @@ describe('manifest technology detection', () => {
     expect(technologiesFromManifestFiles(['DOCKERFILE', 'Config.ru'])).toEqual(['Docker'])
     expect(technologiesFromManifestFiles(['config.ru', 'Gemfile'])).toEqual(['Bundler', 'Rails'])
   })
+
+  it('detects framework config files and runtime pins at the repository root', () => {
+    expect(technologiesFromManifestFiles([
+      'pubspec.yaml', 'vite.config.ts', 'astro.config.mjs', 'tailwind.config.js', '.nvmrc',
+    ])).toEqual(['Flutter', 'Vite', 'Astro', 'Tailwind CSS', 'Node.js'])
+  })
 })

@@ -22,9 +22,19 @@ describe('package technology detection', () => {
 
   it('identifies data and AI platform SDKs from scoped packages', () => {
     expect(technologiesFromPackageDependencies([
-      '@tanstack/react-query', '@heroui/react', '@nextui-org/system', '@upstash/redis',
+      '@heroui/react', '@nextui-org/system', '@upstash/redis',
       '@neondatabase/serverless', '@google/genai', '@google/generative-ai', 'redis', 'private-package'
-    ])).toEqual(['TanStack', 'HeroUI', 'Upstash', 'Neon', 'Gemini', 'Redis'])
+    ])).toEqual(['HeroUI', 'Upstash', 'Neon', 'Gemini', 'Redis'])
+  })
+
+  it('names the specific TanStack product a package belongs to', () => {
+    expect(technologiesFromPackageDependencies([
+      '@tanstack/react-router', '@tanstack/react-query', '@tanstack/react-table',
+      '@tanstack/react-start', '@tanstack/react-form', '@tanstack/react-virtual', '@tanstack/store',
+    ])).toEqual([
+      'TanStack Router', 'TanStack Query', 'TanStack Table', 'TanStack Start',
+      'TanStack Form', 'TanStack Virtual', 'TanStack',
+    ])
   })
 
   it('merges manifest and existing values using punctuation-insensitive names', () => {
