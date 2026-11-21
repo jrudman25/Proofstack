@@ -133,7 +133,7 @@ npm audit
 
 Tests cover request boundaries, signatures, authentication and redirects, hybrid chat context and retrieval fallback, cache isolation, pagination, rate limits, processing leases/idempotency, and Gemini fallback/embedding behavior. External providers are simulated; these tests do not prove live provider availability or deployed RLS behavior. Migration tests are static checks, not a PostgreSQL execution test.
 
-Next.js and `eslint-config-next` are pinned to stable 16.3.4. The application uses the Next.js Proxy convention, native flat ESLint configuration, and the default Turbopack development and production builds. Audit findings must be reviewed before deployment; a stable framework pin is not a claim that every transitive dependency is vulnerability-free.
+Next.js and `eslint-config-next` are pinned to stable 16.4.6. The application uses the Next.js Proxy convention, native flat ESLint configuration, and the default Turbopack development and production builds. Audit findings must be reviewed before deployment; a stable framework pin is not a claim that every transitive dependency is vulnerability-free.
 
 ## License
 
