@@ -51,7 +51,7 @@ Legacy task and milestone product UI and browser writes are retired. Retained ro
 
 ## Current architecture
 
-- Next.js 16.3.4 and React 19
+- Next.js 16.4.6 and React 19
 - Supabase Auth, PostgreSQL, RLS, and pgvector
 - GitHub OAuth and repository APIs
 - Gemini generation and embeddings through `@google/genai`
@@ -72,7 +72,7 @@ npm run build
 npm audit
 ```
 
-Run the checks relevant to the change. For local production runtime checks (`npm run build` then `npx next start`), `NEXT_PUBLIC_APP_URL` must be an `https` origin at build time because `originEnv` rejects `http` outside development and the value is inlined; an `http://localhost` value makes every route return 500. Status codes for `/u/[slug]` must be decided in `src/utils/supabase/proxy.ts`, not by `notFound()` in the page, because the route streams behind `loading.tsx` and cannot change its 200 status after flushing. Database migration tests in this repository are static checks and do not replace execution against a local or staging PostgreSQL instance. Back up and test restoration before applying schema changes to existing data. `supabase/migrations/20260921000000_retire_legacy_features.sql` contains a destructive column drop (`projects.summary`); back up and execute it against local or staging PostgreSQL before any production application. The hosted Proofstack instance has migration version `20260922041704` (`retire_legacy_features`) applied and verified. The hosted Proofstack instance also has migration version `20260923042352` (`mark_deleted_github_repositories`) applied; `projects.github_deleted_at` is verified as a nullable `timestamp with time zone`.
+Run the checks relevant to the change. GitHub Actions (`.github/workflows/ci.yml`) runs `npm test`, `npm run lint`, and `npx next typegen && npx tsc --noEmit` on pushes to `main` and on pull requests; Vercel owns builds and deployment. For local production runtime checks (`npm run build` then `npx next start`), `NEXT_PUBLIC_APP_URL` must be an `https` origin at build time because `originEnv` rejects `http` outside development and the value is inlined; an `http://localhost` value makes every route return 500. Status codes for `/u/[slug]` must be decided in `src/utils/supabase/proxy.ts`, not by `notFound()` in the page, because the route streams behind `loading.tsx` and cannot change its 200 status after flushing. Database migration tests in this repository are static checks and do not replace execution against a local or staging PostgreSQL instance. Back up and test restoration before applying schema changes to existing data. `supabase/migrations/20260921000000_retire_legacy_features.sql` contains a destructive column drop (`projects.summary`); back up and execute it against local or staging PostgreSQL before any production application. The hosted Proofstack instance has migration version `20260922041704` (`retire_legacy_features`) applied and verified. The hosted Proofstack instance also has migration version `20260923042352` (`mark_deleted_github_repositories`) applied; `projects.github_deleted_at` is verified as a nullable `timestamp with time zone`.
 
 ## Planning
 
