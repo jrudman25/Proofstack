@@ -4,7 +4,7 @@ import { Logo } from '@/components/icons/Logo'
 import { createClient } from '@/utils/supabase/server'
 
 export const metadata: Metadata = {
-  title: 'Help and FAQ · Proofstack',
+  title: 'Help and FAQ',
   description: 'Learn how repository sync, AI features, private repository consent, public profiles, and account controls work in Proofstack.',
 }
 

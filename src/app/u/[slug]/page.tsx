@@ -28,12 +28,21 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!profile) {
     // Automated previews are temporary and must stay out of search indexes.
     const valid = GITHUB_USERNAME_PATTERN.test(slug.toLowerCase())
-    return { title: valid ? `@${slug} · automated preview` : 'Profile not found', robots: { index: false, follow: false } }
+    return { title: valid ? `@${slug} automated preview` : 'Profile not found', robots: { index: false, follow: false } }
   }
   const name = profile.fullName || profile.githubUsername
+  const description = profile.briefing?.summary ?? `${name} on Proofstack`
   return {
-    title: `${name} · Proofstack`,
-    description: profile.briefing?.summary ?? `${name} on Proofstack`,
+    title: name,
+    description,
+    alternates: { canonical: `/u/${encodeURIComponent(slug)}` },
+    openGraph: {
+      title: `${name} · Proofstack`,
+      description,
+      type: 'profile',
+      url: `/u/${encodeURIComponent(slug)}`,
+    },
+    twitter: { card: 'summary_large_image' },
   }
 }
 

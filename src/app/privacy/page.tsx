@@ -2,7 +2,10 @@ import Link from 'next/link'
 import { Logo } from '@/components/icons/Logo'
 import { createClient } from '@/utils/supabase/server'
 
-export const metadata = { title: 'Privacy and data use · Proofstack' }
+export const metadata = {
+  title: 'Privacy and data use',
+  description: 'How Proofstack handles GitHub sign-in scopes, repository evidence, AI processing consent for private repositories, and account data.',
+}
 
 export default async function PrivacyPage() {
   const supabase = await createClient()
